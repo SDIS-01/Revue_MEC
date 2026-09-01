@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revue d'avancement</title>
+<style>
+  :root{
+    --rouge:#C0504D; --encre:#1a1a18; --gris:#666660; --gris-clair:#888780;
+    --trait:#DDDBD3; --fond:#F4F3EE; --vert:#3B6D11;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:16px;font:13px/1.5 Tahoma,Verdana,sans-serif;color:var(--encre);background:#fff}
+  h1{font-size:15px;font-weight:normal;margin:0 0 2px}
+  .sous{font-size:11px;color:var(--gris-clair);margin:0 0 16px}
+  fieldset{border:1px solid var(--trait);border-radius:4px;padding:10px 12px 12px;margin:0 0 12px}
+  legend{font-size:11px;color:var(--gris);padding:0 4px}
+  label{font-size:12px}
+  .ligne{display:flex;align-items:center;gap:8px;margin:6px 0}
+  .ligne > label:first-child{width:150px;flex:none;color:var(--gris)}
+  input[type=text],select{font:12px Tahoma,Verdana,sans-serif;padding:4px 6px;border:1px solid var(--trait);border-radius:3px;background:#fff;color:var(--encre);min-width:0}
+  input[type=text]{flex:1}
+  select{flex:1}
+  input:disabled,select:disabled{background:var(--fond);color:var(--gris-clair)}
+  .grille{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:4px 12px}
+  .liste{max-height:190px;overflow:auto;border:1px solid var(--trait);border-radius:3px;padding:6px}
+  .item{display:flex;align-items:center;gap:6px;padding:2px 4px;border-radius:3px}
+  .item.drag{cursor:grab;background:var(--fond);margin-bottom:2px}
+  .item.survol{outline:1px dashed var(--rouge)}
+  .poignee{color:var(--gris-clair);cursor:grab;user-select:none}
+  button{font:12px Tahoma,Verdana,sans-serif;padding:6px 14px;border:1px solid var(--trait);border-radius:3px;background:#fff;cursor:pointer}
+  button:hover{background:var(--fond)}
+  button.primaire{background:var(--rouge);border-color:var(--rouge);color:#fff}
+  button.primaire:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.5;cursor:default}
+  .actions{display:flex;align-items:center;gap:10px;margin-top:4px}
+  .etat{font-size:11px;color:var(--gris)}
+  .etat.erreur{color:var(--rouge)}
+  .etat.ok{color:var(--vert)}
+  .aide{font-size:11px;color:var(--gris-clair);margin:4px 0 0}
+  #recherche{margin-bottom:6px}
+</style>
+</head>
+<body>
+
+<h1>Revue d'avancement</h1>
+<p class="sous">Édite un PDF de synthèse et enregistre l'état du portefeuille dans la table d'historique.</p>
+
+<fieldset>
+  <legend>Sources</legend>
+  <div class="ligne"><label for="tblSource">Table des données</label><select id="tblSource"></select></div>
+  <div class="ligne"><label for="tblHisto">Table d'historique</label><select id="tblHisto"></select></div>
+  <div class="grille" id="mapping"></div>
+  <p class="aide" id="aideHisto"></p>
+</fieldset>
+
+<fieldset>
+  <legend>Périmètre</legend>
+  <div class="ligne">
+    <label for="perimetre">Étendue</label>
+    <select id="perimetre">
+      <option value="portefeuille">Portefeuille complet</option>
+      <option value="groupement">Un groupement</option>
+      <option value="selection">Sélection manuelle</option>
+    </select>
+  </div>
+  <div class="ligne" id="ligneGroupement" hidden><label for="groupement">Groupement</label><select id="groupement"></select></div>
+  <div id="blocSelection" hidden>
+    <input type="text" id="recherche" placeholder="Filtrer les recommandations">
+    <div class="liste" id="listeSelection"></div>
+    <p class="aide"><span id="nbSelection">0</span> recommandation(s) retenue(s)</p>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>Colonnes du tableau détaillé</legend>
+  <div class="liste" id="listeColonnes"></div>
+  <p class="aide">Cochez les colonnes à imprimer, glissez-les pour changer l'ordre.</p>
+</fieldset>
+
+<fieldset>
+  <legend>Comparaison</legend>
+  <div class="ligne">
+    <label><input type="checkbox" id="avecEvolution" checked> Inclure l'évolution</label>
+  </div>
+  <div class="ligne"><label for="reference">Édition de référence</label><select id="reference"></select></div>
+</fieldset>
+
+<fieldset>
+  <legend>Édition</legend>
+  <div class="ligne"><label for="libelle">Libellé de la revue</label><input type="text" id="libelle" placeholder="Revue COPIL septembre"></div>
+  <div class="actions">
+    <button id="btnEditer" class="primaire">Éditer la revue</button>
+    <span class="etat" id="etat"></span>
+  </div>
+</fieldset>
+
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+"use strict";
+
+const LOGO_B64 = "data:image/png;base64,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";
+
+/* ---------- Référentiels ---------- */
+
+const CATEGORIES = [
+  {cle:"recommandation",            libelle:"Recommandation",            couleur:[191, 32,111]},
+  {cle:"recommandation majeure",    libelle:"Recommandation majeure",    couleur:[128,100,162]},
+  {cle:"rappel au droit",           libelle:"Rappel au droit",           couleur:[ 75,172,198]},
+  {cle:"rappel au droit principal", libelle:"Rappel au droit principal", couleur:[  0,  0,145]}
+];
+
+const STATUTS = [
+  {cle:"termine",    libelle:"Terminé",    couleur:[155,187, 89]},
+  {cle:"en cours",   libelle:"En cours",   couleur:[255,204,  0]},
+  {cle:"interrompu", libelle:"Interrompu", couleur:[ 89, 89, 89]},
+  {cle:"a faire",    libelle:"À faire",    couleur:[192, 80, 77]}
+];
+
+const VERT_CLAIR  = [234,243,222], TEXTE_VERT  = [79,115, 20];
+const JAUNE_CLAIR = [255,248,219], TEXTE_JAUNE = [122, 96,  0];
+const GRIS_CLAIR  = [241,239,232], TEXTE_GRIS  = [122,121,115];
+const ENCRE = [26,26,24], GRIS = [102,102,96], ESTOMPE = [136,135,128];
+const TRAIT = [221,219,211], FOND = [244,243,238], ROUGE = [192,80,77], VIDE = [201,199,191];
+
+const COLONNES_HISTO = ["Date_Revue","Libelle_Revue","Perimetre","Detail_Perimetre","Cle_Ligne",
+  "ID_MEC_2023","Recommandation_Rappel","Statut","Avancement","Groupement","Porteur"];
+
+const CHAMPS = [
+  {cle:"id",         libelle:"Identifiant",  defaut:"ID_MEC_2023"},
+  {cle:"categorie",  libelle:"Catégorie",    defaut:"Recommandation_Rappel"},
+  {cle:"statut",     libelle:"Statut",       defaut:"Statut"},
+  {cle:"avancement", libelle:"Avancement",   defaut:"Avancement"},
+  {cle:"groupement", libelle:"Groupement",   defaut:"Groupement"},
+  {cle:"porteur",    libelle:"Porteur",      defaut:"Porteur"}
+];
+
+/* ---------- Utilitaires ---------- */
+
+const normaliser = v => String(v ?? "")
+  .normalize("NFD").replace(/[\u0300-\u036f]/g,"")
+  .replace(/\s+/g," ").trim().toLowerCase();
+
+const categorieDe = v => CATEGORIES.find(c => c.cle === normaliser(v)) || null;
+const statutDe    = v => STATUTS.find(s => s.cle === normaliser(v)) || null;
+
+function pourcent(x){ return (Math.round(x*1000)/10).toFixed(1).replace(".",",") + " %"; }
+function entier(x){ return String(Math.round(x)); }
+
+function dateFr(ts){
+  if (ts === null || ts === undefined || ts === "") return "";
+  const d = new Date(typeof ts === "number" ? ts*1000 : ts);
+  if (isNaN(d)) return "";
+  const p = n => String(n).padStart(2,"0");
+  return p(d.getDate())+"/"+p(d.getMonth()+1)+"/"+d.getFullYear();
+}
+
+function melangerBlanc(rgb, part){
+  return rgb.map(c => Math.round(c*part + 255*(1-part)));
+}
+
+function texteCellule(v){
+  if (v === null || v === undefined) return "";
+  if (Array.isArray(v)) return v.slice(1).map(texteCellule).filter(Boolean).join(", ");
+  if (typeof v === "boolean") return v ? "Oui" : "Non";
+  if (typeof v === "number" && v > 100000000) return dateFr(v);
+  return String(v);
+}
+
+/* ---------- État ---------- */
+
+const etatApp = {
+  tables:[], colonnesSource:[], enregistrements:[],
+  mapping:{}, colonnesChoisies:[], selection:new Set(),
+  editions:[], options:{}
+};
+
+const $ = id => document.getElementById(id);
+
+function message(txt, type){
+  const el = $("etat");
+  el.textContent = txt || "";
+  el.className = "etat" + (type ? " "+type : "");
+}
+
+/* ---------- Chargement Grist ---------- */
+
+grist.ready({requiredAccess:"full"});
+
+async function demarrer(){
+  try{
+    etatApp.options = (await grist.widgetApi.getOptions()) || {};
+    const tables = await grist.docApi.listTables();
+    etatApp.tables = tables;
+    remplirSelect($("tblSource"), tables, etatApp.options.tableSource || "MEC_2023");
+    remplirSelect($("tblHisto"),  tables, etatApp.options.tableHisto  || "Revue_MEC_Historique");
+    verifierHistorique();
+    await chargerSource();
+    await chargerEditions();
+  }catch(e){
+    message("Chargement impossible : " + e.message, "erreur");
+  }
+}
+
+function remplirSelect(sel, valeurs, choisie){
+  sel.innerHTML = "";
+  for (const v of valeurs){
+    const o = document.createElement("option");
+    o.value = v; o.textContent = v;
+    if (v === choisie) o.selected = true;
+    sel.appendChild(o);
+  }
+}
+
+async function chargerSource(){
+  const table = $("tblSource").value;
+  if (!table) return;
+  const donnees = await grist.docApi.fetchTable(table);
+  const colonnes = Object.keys(donnees).filter(c => c !== "manualSort");
+  etatApp.colonnesSource = colonnes.filter(c => c !== "id");
+  const n = donnees.id.length;
+  etatApp.enregistrements = [];
+  for (let i=0; i<n; i++){
+    const r = {id: donnees.id[i]};
+    for (const c of etatApp.colonnesSource) r[c] = donnees[c][i];
+    etatApp.enregistrements.push(r);
+  }
+  construireMapping();
+  construireColonnes();
+  construireGroupements();
+  construireSelection();
+}
+
+function construireMapping(){
+  const hote = $("mapping");
+  hote.innerHTML = "";
+  const enregistre = etatApp.options.mapping || {};
+  for (const champ of CHAMPS){
+    const ligne = document.createElement("div");
+    ligne.className = "ligne";
+    const lab = document.createElement("label");
+    lab.textContent = champ.libelle;
+    lab.style.width = "100px";
+    const sel = document.createElement("select");
+    sel.dataset.champ = champ.cle;
+    const vide = document.createElement("option");
+    vide.value = ""; vide.textContent = "—";
+    sel.appendChild(vide);
+    let choisie = enregistre[champ.cle];
+    if (!choisie || !etatApp.colonnesSource.includes(choisie)){
+      choisie = etatApp.colonnesSource.includes(champ.defaut) ? champ.defaut : "";
+    }
+    for (const c of etatApp.colonnesSource){
+      const o = document.createElement("option");
+      o.value = c; o.textContent = c;
+      if (c === choisie) o.selected = true;
+      sel.appendChild(o);
+    }
+    sel.addEventListener("change", () => { lireMapping(); enregistrerOptions(); });
+    ligne.append(lab, sel);
+    hote.appendChild(ligne);
+  }
+  lireMapping();
+}
+
+function lireMapping(){
+  etatApp.mapping = {};
+  for (const sel of $("mapping").querySelectorAll("select")){
+    etatApp.mapping[sel.dataset.champ] = sel.value;
+  }
+}
+
+function construireColonnes(){
+  const hote = $("listeColonnes");
+  hote.innerHTML = "";
+  let ordre = etatApp.options.colonnes;
+  if (!Array.isArray(ordre) || !ordre.length){
+    ordre = etatApp.colonnesSource.slice(0,5);
+  }
+  const cochees = new Set(ordre.filter(c => etatApp.colonnesSource.includes(c)));
+  const liste = [...cochees, ...etatApp.colonnesSource.filter(c => !cochees.has(c))];
+  for (const col of liste){
+    const item = document.createElement("div");
+    item.className = "item drag";
+    item.draggable = true;
+    item.dataset.colonne = col;
+    const poignee = document.createElement("span");
+    poignee.className = "poignee"; poignee.textContent = "≡";
+    const cb = document.createElement("input");
+    cb.type = "checkbox"; cb.checked = cochees.has(col);
+    cb.addEventListener("change", () => { lireColonnes(); enregistrerOptions(); });
+    const lab = document.createElement("label");
+    lab.textContent = col;
+    item.append(poignee, cb, lab);
+    brancherGlisser(item, hote);
+    hote.appendChild(item);
+  }
+  lireColonnes();
+}
+
+function brancherGlisser(item, hote){
+  item.addEventListener("dragstart", e => {
+    e.dataTransfer.setData("text/plain", item.dataset.colonne);
+    item.style.opacity = ".4";
+  });
+  item.addEventListener("dragend", () => { item.style.opacity = ""; });
+  item.addEventListener("dragover", e => { e.preventDefault(); item.classList.add("survol"); });
+  item.addEventListener("dragleave", () => item.classList.remove("survol"));
+  item.addEventListener("drop", e => {
+    e.preventDefault();
+    item.classList.remove("survol");
+    const source = hote.querySelector('[data-colonne="'+e.dataTransfer.getData("text/plain")+'"]');
+    if (source && source !== item) hote.insertBefore(source, item);
+    lireColonnes(); enregistrerOptions();
+  });
+}
+
+function lireColonnes(){
+  etatApp.colonnesChoisies = [...$("listeColonnes").children]
+    .filter(el => el.querySelector("input").checked)
+    .map(el => el.dataset.colonne);
+}
+
+function construireGroupements(){
+  const champ = etatApp.mapping.groupement;
+  const valeurs = new Set();
+  if (champ) for (const r of etatApp.enregistrements){
+    const v = texteCellule(r[champ]).trim();
+    if (v) valeurs.add(v);
+  }
+  remplirSelect($("groupement"), [...valeurs].sort(), etatApp.options.detailPerimetre);
+}
+
+function construireSelection(){
+  const hote = $("listeSelection");
+  hote.innerHTML = "";
+  const champId = etatApp.mapping.id;
+  for (const r of etatApp.enregistrements){
+    const item = document.createElement("div");
+    item.className = "item";
+    item.dataset.cle = normaliser(r[champId]);
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.dataset.rowid = r.id;
+    cb.addEventListener("change", () => {
+      cb.checked ? etatApp.selection.add(r.id) : etatApp.selection.delete(r.id);
+      $("nbSelection").textContent = etatApp.selection.size;
+    });
+    const lab = document.createElement("label");
+    lab.textContent = texteCellule(r[champId]);
+    item.append(cb, lab);
+    hote.appendChild(item);
+  }
+  $("nbSelection").textContent = etatApp.selection.size;
+}
+
+/* ---------- Historique ---------- */
+
+async function chargerEditions(){
+  etatApp.editions = [];
+  const table = $("tblHisto").value;
+  if (!table){ remplirEditions(); return; }
+  let donnees;
+  try{ donnees = await grist.docApi.fetchTable(table); }
+  catch(e){ remplirEditions(); return; }
+  const n = (donnees.id || []).length;
+  const groupes = new Map();
+  for (let i=0; i<n; i++){
+    const ts = donnees.Date_Revue ? donnees.Date_Revue[i] : null;
+    const cle = String(ts);
+    if (!groupes.has(cle)){
+      groupes.set(cle, {
+        ts, libelle: donnees.Libelle_Revue ? donnees.Libelle_Revue[i] : "",
+        perimetre: donnees.Perimetre ? donnees.Perimetre[i] : "",
+        detail: donnees.Detail_Perimetre ? donnees.Detail_Perimetre[i] : "",
+        lignes: []
+      });
+    }
+    groupes.get(cle).lignes.push({
+      cle: donnees.Cle_Ligne ? donnees.Cle_Ligne[i] : null,
+      id: donnees.ID_MEC_2023 ? donnees.ID_MEC_2023[i] : "",
+      statut: donnees.Statut ? donnees.Statut[i] : "",
+      avancement: donnees.Avancement ? donnees.Avancement[i] : 0
+    });
+  }
+  etatApp.editions = [...groupes.values()].sort((a,b) => (b.ts||0) - (a.ts||0));
+  remplirEditions();
+}
+
+function remplirEditions(){
+  const sel = $("reference");
+  sel.innerHTML = "";
+  const perimetre = $("perimetre").value;
+  const compatibles = etatApp.editions.filter(e => !e.perimetre || e.perimetre === perimetre);
+  const liste = compatibles.length ? compatibles : etatApp.editions;
+  if (!liste.length){
+    const o = document.createElement("option");
+    o.value = ""; o.textContent = "Aucune édition enregistrée";
+    sel.appendChild(o);
+    sel.disabled = true;
+    return;
+  }
+  sel.disabled = !$("avecEvolution").checked;
+  liste.forEach((e, i) => {
+    const o = document.createElement("option");
+    o.value = String(e.ts);
+    o.textContent = (e.libelle ? e.libelle + " — " : "") + dateFr(e.ts) +
+                    (e.perimetre !== perimetre ? "  (autre périmètre)" : "");
+    if (i === 0) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function verifierHistorique(){
+  const table = $("tblHisto").value;
+  $("aideHisto").textContent = table
+    ? "Colonnes attendues dans " + table + " : " + COLONNES_HISTO.join(", ") + "."
+    : "";
+}
+
+/* ---------- Calculs ---------- */
+
+function enPerimetre(){
+  const mode = $("perimetre").value;
+  const m = etatApp.mapping;
+  if (mode === "groupement"){
+    const g = $("groupement").value;
+    return etatApp.enregistrements.filter(r => texteCellule(r[m.groupement]).trim() === g);
+  }
+  if (mode === "selection"){
+    return etatApp.enregistrements.filter(r => etatApp.selection.has(r.id));
+  }
+  return etatApp.enregistrements.slice();
+}
+
+function avancementDe(r){
+  const v = Number(r[etatApp.mapping.avancement]);
+  if (!isFinite(v)) return 0;
+  return v > 1 ? v/100 : v;
+}
+
+function calculer(lignes){
+  const m = etatApp.mapping;
+  const parStatut = {}, parCategorie = {}, croise = {};
+  for (const s of STATUTS) parStatut[s.cle] = 0;
+  for (const c of CATEGORIES){
+    parCategorie[c.cle] = 0;
+    croise[c.cle] = {};
+    for (const s of STATUTS) croise[c.cle][s.cle] = 0;
+  }
+  let somme = 0, inconnus = 0;
+  for (const r of lignes){
+    somme += avancementDe(r);
+    const c = categorieDe(r[m.categorie]);
+    const s = statutDe(r[m.statut]);
+    if (c) parCategorie[c.cle]++;
+    if (s) parStatut[s.cle]++;
+    if (c && s) croise[c.cle][s.cle]++;
+    if (!c || !s) inconnus++;
+  }
+  return {
+    total: lignes.length,
+    global: lignes.length ? somme/lignes.length : 0,
+    parStatut, parCategorie, croise, inconnus
+  };
+}
+
+function comparer(lignes, edition){
+  if (!edition) return null;
+  const m = etatApp.mapping;
+  const avant = new Map();
+  for (const l of edition.lignes) if (l.cle !== null) avant.set(l.cle, l);
+  const progres = [], recul = [], stables = [], nouveaux = [];
+  for (const r of lignes){
+    const a = avant.get(r.id);
+    const actuel = avancementDe(r);
+    if (!a){ nouveaux.push({r, actuel}); continue; }
+    const ancien = a.avancement > 1 ? a.avancement/100 : a.avancement;
+    const item = {r, ancien, actuel};
+    if (actuel > ancien + 1e-9) progres.push(item);
+    else if (actuel < ancien - 1e-9) recul.push(item);
+    else stables.push(item);
+    avant.delete(r.id);
+  }
+  const sorties = [...avant.values()];
+  const sommeAvant = edition.lignes.reduce((t,l) => t + (l.avancement > 1 ? l.avancement/100 : l.avancement), 0);
+  return {
+    globalAvant: edition.lignes.length ? sommeAvant/edition.lignes.length : 0,
+    progres, recul, stables, nouveaux, sorties, edition
+  };
+}
+
+/* ---------- Camemberts ---------- */
+
+function dessinerCamembert(segments, total){
+  const taille = 480, canvas = document.createElement("canvas");
+  canvas.width = canvas.height = taille;
+  const ctx = canvas.getContext("2d");
+  const cx = taille/2, cy = taille/2, rExt = taille/2 - 4, rInt = rExt*0.56;
+  let angle = -Math.PI/2;
+  for (const seg of segments){
+    if (!seg.valeur) continue;
+    const balayage = (seg.valeur/total) * Math.PI*2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rExt, angle, angle+balayage);
+    ctx.arc(cx, cy, rInt, angle+balayage, angle, true);
+    ctx.closePath();
+    ctx.fillStyle = "rgb("+seg.couleur.join(",")+")";
+    ctx.fill();
+    angle += balayage;
+  }
+  ctx.fillStyle = "rgb(26,26,24)";
+  ctx.font = "500 62px Tahoma, Verdana, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(String(total), cx, cy+2);
+  return canvas.toDataURL("image/png");
+}
+
+/* ---------- Mise en page PDF ---------- */
+
+const MARGE = 12, DROITE = 285, BAS = 196;
+
+function nouvelleFeuille(doc, contexte){
+  doc.addPage();
+  contexte.page++;
+  return enTete(doc, contexte);
+}
+
+function enTete(doc, contexte){
+  doc.addImage(LOGO_B64, "PNG", MARGE, 8, 30, 19.2);
+  doc.setFont("helvetica","normal");
+  doc.setFontSize(13); doc.setTextColor(...ENCRE);
+  doc.text("Revue d'avancement — " + contexte.titre, 48, 17);
+  doc.setFontSize(8); doc.setTextColor(...ESTOMPE);
+  doc.text("Édition du " + contexte.dateEdition + " — " + contexte.libellePerimetre, 48, 23);
+  doc.setFillColor(...ROUGE);
+  doc.rect(MARGE, 28, DROITE-MARGE, 1.1, "F");
+  return 38;
+}
+
+function piedDePage(doc, contexte){
+  const total = doc.getNumberOfPages();
+  for (let p=1; p<=total; p++){
+    doc.setPage(p);
+    doc.setFontSize(7.5); doc.setTextColor(...VIDE);
+    doc.text(String(p), 148.5, 202, {align:"center"});
+  }
+}
+
+function cadreValeur(doc, x, y, largeur, hauteur, etiquette, valeur, couleur){
+  doc.setFillColor(...FOND);
+  doc.roundedRect(x, y, largeur, hauteur, 1.2, 1.2, "F");
+  doc.setFontSize(7.5); doc.setTextColor(...GRIS);
+  doc.text(etiquette, x+largeur/2, y+6, {align:"center"});
+  doc.setFontSize(15); doc.setTextColor(...couleur);
+  doc.text(valeur, x+largeur/2, y+15, {align:"center"});
+}
+
+function legende(doc, x, y, entrees, largeur){
+  let ligne = y;
+  for (const e of entrees){
+    doc.setFillColor(...e.couleur);
+    doc.rect(x, ligne-2.6, 3, 3, "F");
+    doc.setFontSize(7.5); doc.setTextColor(61,61,58);
+    doc.text(e.libelle, x+5, ligne);
+    doc.setTextColor(...GRIS);
+    doc.text(e.valeur, x+largeur, ligne, {align:"right"});
+    ligne += 6.5;
+  }
+}
+
+function pageSynthese(doc, contexte, stats, evolution){
+  let y = enTete(doc, contexte);
+
+  doc.setFontSize(8); doc.setTextColor(...GRIS);
+  doc.text("Avancement global", MARGE, y);
+  doc.setFontSize(26); doc.setTextColor(...ENCRE);
+  doc.text(pourcent(stats.global), MARGE, y+13);
+
+  if (evolution){
+    const ecart = (stats.global - evolution.globalAvant) * 100;
+    const hausse = ecart >= 0;
+    doc.setFillColor(...(hausse ? [234,243,222] : [252,235,235]));
+    doc.roundedRect(58, y+4, 38, 9, 1.2, 1.2, "F");
+    doc.setFontSize(9); doc.setTextColor(...(hausse ? [59,109,17] : [153,51,51]));
+    doc.text((hausse ? "+ " : "- ") + Math.abs(ecart).toFixed(1).replace(".",",") + " pts",
+             77, y+10.5, {align:"center"});
+    doc.setFontSize(7.5); doc.setTextColor(...ESTOMPE);
+    doc.text("vs revue du " + dateFr(evolution.edition.ts) + " — " + pourcent(evolution.globalAvant),
+             MARGE, y+22);
+  }
+
+  const largeurCadre = 37, pas = 41;
+  let x = DROITE - 4*largeurCadre - 3*(pas-largeurCadre);
+  for (const s of STATUTS){
+    cadreValeur(doc, x, y-2, largeurCadre, 20, s.libelle, String(stats.parStatut[s.cle]),
+                s.cle === "en cours" ? [154,122,0] : s.couleur);
+    x += pas;
+  }
+
+  doc.setDrawColor(...TRAIT); doc.setLineWidth(0.2);
+  doc.line(MARGE, y+30, DROITE, y+30);
+
+  const hautGraphes = y+40;
+  doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
+  doc.text("Répartition par statut", MARGE, hautGraphes);
+  doc.text("Répartition par catégorie", 156, hautGraphes);
+
+  const segStatut = STATUTS.map(s => ({valeur: stats.parStatut[s.cle], couleur: s.couleur}));
+  const segCategorie = CATEGORIES.map(c => ({valeur: stats.parCategorie[c.cle], couleur: c.couleur}));
+  if (stats.total){
+    doc.addImage(dessinerCamembert(segStatut, stats.total), "PNG", 21, hautGraphes+4, 30, 30);
+    doc.addImage(dessinerCamembert(segCategorie, stats.total), "PNG", 165, hautGraphes+4, 30, 30);
+  }
+
+  legende(doc, 58, hautGraphes+11, STATUTS.map(s => ({
+    libelle: s.libelle, couleur: s.couleur,
+    valeur: stats.parStatut[s.cle] + " (" + pourcent(stats.total ? stats.parStatut[s.cle]/stats.total : 0) + ")"
+  })), 84);
+
+  doc.setDrawColor(...TRAIT);
+  doc.line(148, hautGraphes-4, 148, hautGraphes+40);
+
+  legende(doc, 202, hautGraphes+11, CATEGORIES.map(c => ({
+    libelle: c.libelle, couleur: c.couleur,
+    valeur: stats.parCategorie[c.cle] + " (" + pourcent(stats.total ? stats.parCategorie[c.cle]/stats.total : 0) + ")"
+  })), 83);
+
+  doc.line(MARGE, hautGraphes+48, DROITE, hautGraphes+48);
+  blocFocus(doc, hautGraphes+58, stats);
+}
+
+function blocFocus(doc, y, stats){
+  doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
+  doc.text("Focus catégorie et statut", MARGE, y);
+
+  const cols = [
+    {cle:"a faire",    x:118, l:46, titre:"À faire",    teinte:true, taille:8, principal:true},
+    {cle:"en cours",   x:166, l:46, titre:"En cours",   doux:JAUNE_CLAIR, encre:TEXTE_JAUNE, taille:8, principal:true},
+    {cle:"termine",    x:214, l:34, titre:"Terminé",    doux:VERT_CLAIR,  encre:TEXTE_VERT,  taille:7.5},
+    {cle:"interrompu", x:250, l:35, titre:"Interrompu", doux:GRIS_CLAIR,  encre:TEXTE_GRIS,  taille:7.5}
+  ];
+
+  for (const c of cols){
+    doc.setFontSize(c.taille); doc.setTextColor(...(c.principal ? GRIS : ESTOMPE));
+    doc.text(c.titre, c.x + c.l/2, y+7, {align:"center"});
+  }
+
+  let ligne = y+11;
+  const hauteur = 9.5, pas = 11;
+  for (const cat of CATEGORIES){
+    doc.setFontSize(7.5); doc.setTextColor(61,61,58);
+    doc.text(cat.libelle, MARGE, ligne+6.2);
+    for (const c of cols){
+      const n = stats.croise[cat.cle][c.cle];
+      const texte = n ? String(n) : "—";
+      if (c.doux){
+        doc.setFillColor(...c.doux);
+        doc.rect(c.x, ligne, c.l, hauteur, "F");
+        doc.setFontSize(c.principal ? 10 : 9);
+        doc.setTextColor(...(n ? c.encre : VIDE));
+      } else {
+        if (n){
+          doc.setFillColor(...melangerBlanc(cat.couleur, 0.10));
+          doc.setDrawColor(...cat.couleur); doc.setLineWidth(0.4);
+          doc.rect(c.x, ligne, c.l, hauteur, "FD");
+          doc.setTextColor(...cat.couleur);
+        } else {
+          doc.setDrawColor(...FOND); doc.setLineWidth(0.2);
+          doc.rect(c.x, ligne, c.l, hauteur, "S");
+          doc.setTextColor(...VIDE);
+        }
+        doc.setFontSize(10);
+      }
+      doc.text(texte, c.x + c.l/2, ligne+6.4, {align:"center"});
+    }
+    ligne += pas;
+  }
+}
+
+function pageEvolution(doc, contexte, evolution){
+  let y = nouvelleFeuille(doc, contexte);
+  doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
+  doc.text("Évolution depuis la revue du " + dateFr(evolution.edition.ts), MARGE, y);
+  y += 8;
+
+  const colonnes = [
+    {titre:"Recommandation", x:MARGE, l:150},
+    {titre:"Statut",         x:164,   l:34},
+    {titre:"Avancement",     x:200,   l:26},
+    {titre:"Évolution",      x:228,   l:57}
+  ];
+  y = enTeteTableau(doc, colonnes, y);
+
+  const sections = [
+    {titre:"Ont progressé", items:evolution.progres, type:"variation"},
+    {titre:"Ont reculé",    items:evolution.recul,   type:"variation"},
+    {titre:"Nouvelles entrées", items:evolution.nouveaux, type:"nouveau"}
+  ];
+
+  const m = etatApp.mapping;
+  for (const section of sections){
+    if (!section.items.length) continue;
+    if (y > BAS-14){ y = nouvelleFeuille(doc, contexte); y = enTeteTableau(doc, colonnes, y); }
+    doc.setFontSize(7.5); doc.setTextColor(...GRIS);
+    doc.text(section.titre + " (" + section.items.length + ")", MARGE, y+4);
+    y += 8;
+    for (const item of section.items){
+      const libelle = texteCellule(item.r[m.id]);
+      const lignes = doc.splitTextToSize(libelle, colonnes[0].l-2);
+      const hauteur = Math.max(6, lignes.length*3.6 + 2.4);
+      if (y + hauteur > BAS){ y = nouvelleFeuille(doc, contexte); y = enTeteTableau(doc, colonnes, y); }
+      doc.setFontSize(7.5); doc.setTextColor(61,61,58);
+      doc.text(lignes, colonnes[0].x, y+4);
+      pastilleStatut(doc, colonnes[1].x, y+0.6, statutDe(item.r[m.statut]));
+      doc.setTextColor(61,61,58);
+      doc.text(pourcent(item.actuel), colonnes[2].x, y+4);
+      if (section.type === "variation"){
+        const hausse = item.actuel > item.ancien;
+        doc.setTextColor(...(hausse ? [59,109,17] : [153,51,51]));
+        doc.text((hausse ? "▲ " : "▼ ") + entier(item.ancien*100) + " → " + entier(item.actuel*100),
+                 colonnes[3].x, y+4);
+      } else {
+        doc.setTextColor(...ESTOMPE);
+        doc.text("nouvelle", colonnes[3].x, y+4);
+      }
+      y += hauteur;
+      doc.setDrawColor(237,235,228); doc.setLineWidth(0.15);
+      doc.line(MARGE, y, DROITE, y);
+    }
+    y += 4;
+  }
+
+  if (evolution.sorties.length){
+    if (y > BAS-14) y = nouvelleFeuille(doc, contexte);
+    doc.setFontSize(7.5); doc.setTextColor(...GRIS);
+    doc.text("Sorties du périmètre (" + evolution.sorties.length + ")", MARGE, y+4);
+    y += 8;
+    for (const s of evolution.sorties){
+      const lignes = doc.splitTextToSize(texteCellule(s.id), DROITE-MARGE-2);
+      const hauteur = Math.max(6, lignes.length*3.6 + 2.4);
+      if (y + hauteur > BAS) y = nouvelleFeuille(doc, contexte);
+      doc.setTextColor(...ESTOMPE);
+      doc.text(lignes, MARGE, y+4);
+      y += hauteur;
+    }
+  }
+  return y;
+}
+
+function pastilleStatut(doc, x, y, statut){
+  if (!statut) return;
+  const fonds = {termine:[237,245,224], "en cours":[255,248,219], interrompu:[241,239,232], "a faire":[251,235,235]};
+  const encres = {termine:[59,109,17], "en cours":[122,96,0], interrompu:[102,102,96], "a faire":[153,51,51]};
+  doc.setFillColor(...fonds[statut.cle]);
+  doc.roundedRect(x, y, 22, 5, 0.8, 0.8, "F");
+  doc.setFontSize(7); doc.setTextColor(...encres[statut.cle]);
+  doc.text(statut.libelle, x+2, y+3.5);
+}
+
+function enTeteTableau(doc, colonnes, y){
+  doc.setFillColor(...FOND);
+  doc.rect(MARGE, y, DROITE-MARGE, 7, "F");
+  doc.setFontSize(7.5); doc.setTextColor(...GRIS);
+  for (const c of colonnes) doc.text(c.titre, c.x, y+4.8);
+  return y+10;
+}
+
+function pageDetail(doc, contexte, lignes){
+  const choisies = etatApp.colonnesChoisies.length ? etatApp.colonnesChoisies : [etatApp.mapping.id];
+  const largeurTotale = DROITE - MARGE;
+  const poids = choisies.map(c => c === etatApp.mapping.id ? 3 : 1);
+  const sommePoids = poids.reduce((a,b) => a+b, 0);
+  let curseur = MARGE;
+  const colonnes = choisies.map((c, i) => {
+    const l = largeurTotale * poids[i] / sommePoids;
+    const col = {titre:c, x:curseur, l:l-2};
+    curseur += l;
+    return col;
+  });
+
+  let y = nouvelleFeuille(doc, contexte);
+  doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
+  doc.text("Détail des recommandations", MARGE, y);
+  y = enTeteTableau(doc, colonnes, y+4);
+
+  for (const r of lignes){
+    const cellules = colonnes.map(c => doc.splitTextToSize(texteCellule(r[c.titre]), c.l));
+    const hauteur = Math.max(6, Math.max(...cellules.map(t => t.length))*3.6 + 2.4);
+    if (y + hauteur > BAS){
+      y = nouvelleFeuille(doc, contexte);
+      y = enTeteTableau(doc, colonnes, y);
+    }
+    doc.setFontSize(7.5); doc.setTextColor(61,61,58);
+    colonnes.forEach((c, i) => doc.text(cellules[i], c.x, y+4));
+    y += hauteur;
+    doc.setDrawColor(237,235,228); doc.setLineWidth(0.15);
+    doc.line(MARGE, y, DROITE, y);
+  }
+}
+
+/* ---------- Enregistrement ---------- */
+
+async function enregistrerRevue(lignes, contexte){
+  const table = $("tblHisto").value;
+  const m = etatApp.mapping;
+  const valeurs = {
+    Date_Revue: [], Libelle_Revue: [], Perimetre: [], Detail_Perimetre: [], Cle_Ligne: [],
+    ID_MEC_2023: [], Recommandation_Rappel: [], Statut: [], Avancement: [], Groupement: [], Porteur: []
+  };
+  for (const r of lignes){
+    valeurs.Date_Revue.push(contexte.horodatage);
+    valeurs.Libelle_Revue.push(contexte.libelle);
+    valeurs.Perimetre.push(contexte.perimetre);
+    valeurs.Detail_Perimetre.push(contexte.detailPerimetre);
+    valeurs.Cle_Ligne.push(r.id);
+    valeurs.ID_MEC_2023.push(texteCellule(r[m.id]));
+    valeurs.Recommandation_Rappel.push(texteCellule(r[m.categorie]));
+    valeurs.Statut.push(texteCellule(r[m.statut]));
+    valeurs.Avancement.push(avancementDe(r));
+    valeurs.Groupement.push(texteCellule(r[m.groupement]));
+    valeurs.Porteur.push(texteCellule(r[m.porteur]));
+  }
+  await grist.docApi.applyUserActions([
+    ["BulkAddRecord", table, lignes.map(() => null), valeurs]
+  ]);
+}
+
+/* ---------- Orchestration ---------- */
+
+async function editer(){
+  const bouton = $("btnEditer");
+  bouton.disabled = true;
+  try{
+    message("Édition en cours…");
+    const lignes = enPerimetre();
+    if (!lignes.length){ message("Aucune recommandation dans ce périmètre.", "erreur"); return; }
+
+    const mode = $("perimetre").value;
+    const detail = mode === "groupement" ? $("groupement").value
+                 : mode === "selection"  ? lignes.map(r => r.id).join(",") : "";
+    const libellePerimetre = mode === "groupement" ? "Groupement " + $("groupement").value
+                           : mode === "selection"  ? "Sélection de " + lignes.length + " recommandations"
+                           : "Portefeuille complet";
+
+    const contexte = {
+      titre: $("tblSource").value,
+      libelle: $("libelle").value.trim(),
+      perimetre: mode,
+      detailPerimetre: detail,
+      libellePerimetre,
+      horodatage: Math.floor(Date.now()/1000),
+      dateEdition: dateFr(Math.floor(Date.now()/1000)),
+      page: 1
+    };
+
+    const stats = calculer(lignes);
+    let evolution = null;
+    if ($("avecEvolution").checked && $("reference").value){
+      const ref = etatApp.editions.find(e => String(e.ts) === $("reference").value);
+      evolution = comparer(lignes, ref);
+    }
+
+    const {jsPDF} = window.jspdf;
+    const doc = new jsPDF({orientation:"landscape", unit:"mm", format:"a4"});
+    pageSynthese(doc, contexte, stats, evolution);
+    if (evolution) pageEvolution(doc, contexte, evolution);
+    pageDetail(doc, contexte, lignes);
+    piedDePage(doc, contexte);
+
+    await enregistrerRevue(lignes, contexte);
+    await chargerEditions();
+
+    const nom = "Revue_" + (contexte.libelle || contexte.titre).replace(/[^\w-]+/g,"_") + ".pdf";
+    doc.save(nom);
+
+    let texte = "Revue éditée et enregistrée (" + lignes.length + " lignes).";
+    if (stats.inconnus) texte += " " + stats.inconnus + " ligne(s) au statut ou à la catégorie non reconnus.";
+    message(texte, "ok");
+  }catch(e){
+    message("Échec : " + e.message, "erreur");
+  }finally{
+    bouton.disabled = false;
+  }
+}
+
+function enregistrerOptions(){
+  grist.widgetApi.setOptions({
+    tableSource: $("tblSource").value,
+    tableHisto: $("tblHisto").value,
+    mapping: etatApp.mapping,
+    colonnes: etatApp.colonnesChoisies,
+    perimetre: $("perimetre").value,
+    detailPerimetre: $("groupement").value,
+    avecEvolution: $("avecEvolution").checked
+  }).catch(() => {});
+}
+
+/* ---------- Branchements ---------- */
+
+$("tblSource").addEventListener("change", async () => { await chargerSource(); enregistrerOptions(); });
+$("tblHisto").addEventListener("change", async () => { verifierHistorique(); await chargerEditions(); enregistrerOptions(); });
+
+$("perimetre").addEventListener("change", () => {
+  const mode = $("perimetre").value;
+  $("ligneGroupement").hidden = mode !== "groupement";
+  $("blocSelection").hidden = mode !== "selection";
+  remplirEditions();
+  enregistrerOptions();
+});
+
+$("groupement").addEventListener("change", enregistrerOptions);
+
+$("avecEvolution").addEventListener("change", () => {
+  $("reference").disabled = !$("avecEvolution").checked || !etatApp.editions.length;
+  enregistrerOptions();
+});
+
+$("recherche").addEventListener("input", e => {
+  const filtre = normaliser(e.target.value);
+  for (const item of $("listeSelection").children){
+    item.hidden = filtre && !item.dataset.cle.includes(filtre);
+  }
+});
+
+$("btnEditer").addEventListener("click", editer);
+
+demarrer();
+</script>
+</body>
+</html>
