@@ -10,6 +10,7 @@
     --trait:#DDDBD3; --fond:#F4F3EE; --vert:#3B6D11;
   }
   *{box-sizing:border-box}
+  [hidden]{display:none !important}
   body{margin:0;padding:16px;font:13px/1.5 Tahoma,Verdana,sans-serif;color:var(--encre);background:#fff}
   h1{font-size:15px;font-weight:normal;margin:0 0 2px}
   .sous{font-size:11px;color:var(--gris-clair);margin:0 0 16px}
@@ -399,7 +400,9 @@ function construireGroupements(){
     const v = texteCellule(r[champ]).trim();
     if (v) valeurs.add(v);
   }
-  remplirSelect($("groupement"), [...valeurs].sort(), etatApp.options.detailPerimetre);
+  remplirSelect($("groupement"), ["", ...[...valeurs].sort()], etatApp.options.detailPerimetre || "");
+  const vide = $("groupement").querySelector('option[value=""]');
+  if (vide) vide.textContent = "— choisir —";
 }
 
 function construireSelection(){
@@ -1059,6 +1062,9 @@ async function editer(){
     if (!lignes.length){ message("Aucune recommandation dans ce périmètre.", "erreur"); return; }
 
     const mode = $("perimetre").value;
+    if (mode === "groupement" && !$("groupement").value){
+      message("Choisissez un groupement.", "erreur"); return;
+    }
     const detail = mode === "groupement" ? $("groupement").value
                  : mode === "selection"  ? lignes.map(r => r.id).join(",") : "";
     const libellePerimetre = mode === "groupement" ? "Groupement " + $("groupement").value
