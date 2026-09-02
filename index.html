@@ -880,12 +880,6 @@ function pastilleStatut(doc, x, y, statut){
   doc.text(statut.libelle, x+2, y+3.5);
 }
 
-function tracerFilet(doc, couleur, y1, y2){
-  if (y2 <= y1) return;
-  doc.setFillColor(...couleur);
-  doc.rect(MARGE-2.4, y1, 1, y2-y1, "F");
-}
-
 function assurerPlace(doc, contexte, y, besoin){
   return (y + besoin > basDe(doc)) ? nouvelleFeuille(doc, contexte) : y;
 }
@@ -922,6 +916,30 @@ function valeurColonne(r, colonne){
   return texteCellule(r[colonne]);
 }
 
+function grouperParCategorie(lignes){
+  const m = etatApp.mapping;
+  const groupes = [];
+  for (const cat of CATEGORIES){
+    const membres = lignes.filter(r => { const c = categorieDe(r[m.categorie]); return c && c.cle === cat.cle; });
+    if (membres.length) groupes.push({cat, membres});
+  }
+  const orphelines = lignes.filter(r => !categorieDe(r[m.categorie]));
+  if (orphelines.length){
+    groupes.push({cat:{cle:"autres", libelle:"Catégorie non reconnue", couleur:ESTOMPE}, membres:orphelines});
+  }
+  return groupes;
+}
+
+const RANGS = [...STATUTS, {cle:"autre", libelle:"Statut non reconnu"}];
+
+function lignesDuRang(membres, rang){
+  const m = etatApp.mapping;
+  return membres.filter(r => {
+    const st = statutDe(r[m.statut]);
+    return rang.cle === "autre" ? !st : (st && st.cle === rang.cle);
+  });
+}
+
 function pageDetail(doc, contexte, lignes, depart){
   const m = etatApp.mapping;
   const choisies = etatApp.colonnesChoisies.length ? etatApp.colonnesChoisies : [m.id];
@@ -945,19 +963,7 @@ function pageDetail(doc, contexte, lignes, depart){
   contexte.reperes.detail = {page: contexte.pages.length, top: Math.max(0, y-8)};
   y += 8;
 
-  const groupes = [];
-  for (const cat of CATEGORIES){
-    const membres = lignes.filter(r => { const c = categorieDe(r[m.categorie]); return c && c.cle === cat.cle; });
-    if (membres.length) groupes.push({cat, membres});
-  }
-  const orphelines = lignes.filter(r => !categorieDe(r[m.categorie]));
-  if (orphelines.length){
-    groupes.push({cat:{cle:"autres", libelle:"Catégorie non reconnue", couleur:ESTOMPE}, membres:orphelines});
-  }
-
-  const rangs = [...STATUTS, {cle:"autre", libelle:"Statut non reconnu"}];
-
-  for (const groupe of groupes){
+  for (const groupe of grouperParCategorie(lignes)){
     y = assurerPlace(doc, contexte, y, 34);
     ancres.set(groupe.cat.cle, {page: contexte.pages.length, top: Math.max(0, y-8)});
 
@@ -968,11 +974,8 @@ function pageDetail(doc, contexte, lignes, depart){
     y += 4;
     y = enTeteTableau(doc, colonnes, y);
 
-    for (const rang of rangs){
-      const sous = groupe.membres.filter(r => {
-        const st = statutDe(r[m.statut]);
-        return rang.cle === "autre" ? !st : (st && st.cle === rang.cle);
-      });
+    for (const rang of RANGS){
+      const sous = lignesDuRang(groupe.membres, rang);
       if (!sous.length) continue;
 
       if (y > bas - 20){
@@ -988,18 +991,16 @@ function pageDetail(doc, contexte, lignes, depart){
       doc.text(rang.libelle + " — " + sous.length, MARGE+2, y+3.4);
       y += 8;
 
-      let filet = y;
       for (const r of sous){
         doc.setFontSize(7.5);
         const cellules = colonnes.map(c =>
           c.colonne === m.avancement ? [""] : doc.splitTextToSize(valeurColonne(r, c.colonne), c.l));
         const hauteur = Math.max(6, Math.max(...cellules.map(t => t.length))*3.4 + 2.2);
         if (y + hauteur > bas){
-          tracerFilet(doc, groupe.cat.couleur, filet, y);
           y = nouvelleFeuille(doc, contexte);
           y = enTeteTableau(doc, colonnes, y);
-          filet = y;
         }
+        ancres.set("ligne:" + r.id, {page: contexte.pages.length, top: Math.max(0, y-6)});
         const statut = statutDe(r[m.statut]);
         colonnes.forEach((c, i) => {
           if (c.colonne === m.avancement){
@@ -1014,7 +1015,6 @@ function pageDetail(doc, contexte, lignes, depart){
         doc.setDrawColor(237,235,228); doc.setLineWidth(0.15);
         doc.line(MARGE, y, droite, y);
       }
-      tracerFilet(doc, groupe.cat.couleur, filet, y);
       y += 2;
     }
     y += 4;
@@ -1022,68 +1022,50 @@ function pageDetail(doc, contexte, lignes, depart){
   return ancres;
 }
 
-function ligneSommaire(doc, y, texte, effectif, cible, options){
-  const droite = droiteDe(doc);
-  const x = options.decale ? MARGE+8 : MARGE+5;
-  if (options.couleur){
-    doc.setFillColor(...options.couleur);
-    doc.rect(MARGE, y-2.6, 3, 3, "F");
-  }
-  doc.setFontSize(options.taille);
-  doc.setTextColor(...options.encre);
-  doc.text(texte + (effectif === null ? "" : "  (" + effectif + ")"), x, y);
-  const numero = String(cible.page);
-  doc.text(numero, droite, y, {align:"right"});
-
-  const largeurTexte = doc.getTextWidth(texte + (effectif === null ? "" : "  (" + effectif + ")"));
-  doc.setDrawColor(...VIDE); doc.setLineWidth(0.15);
-  doc.setLineDashPattern([0.4, 0.9], 0);
-  doc.line(x + largeurTexte + 2, y-0.8, droite - 5, y-0.8);
-  doc.setLineDashPattern([], 0);
-
-  doc.link(MARGE, y-4, droite-MARGE, 5.4, {pageNumber: cible.page, top: cible.top});
-  return y + (options.decale ? 5.4 : 6.6);
-}
-
-function pageSommaire(doc, contexte, ancres, stats, evolution){
+function dessinerSommaire(doc, contexte, ancres, lignes){
+  const m = etatApp.mapping;
+  const avant = doc.internal.getNumberOfPages();
   let y = nouvelleFeuille(doc, contexte);
-  const numeroFeuille = doc.internal.getNumberOfPages();
+  const droite = droiteDe(doc), bas = basDe(doc);
+  const largeurTexte = droite - MARGE - 34;
 
   doc.setFontSize(11); doc.setTextColor(...ENCRE);
   doc.text("Sommaire", MARGE, y);
-  y += 10;
+  y += 9;
 
-  y = ligneSommaire(doc, y, "Synthèse", null, {page:1, top:0},
-                    {taille:9, encre:ENCRE});
-  if (evolution && contexte.reperes.evolution){
-    y = ligneSommaire(doc, y, "Évolution depuis la revue du " + dateFr(evolution.edition.ts), null,
-                      contexte.reperes.evolution, {taille:9, encre:ENCRE});
-  }
-  if (contexte.reperes.detail){
-    y = ligneSommaire(doc, y, "Détail des recommandations", null,
-                      contexte.reperes.detail, {taille:9, encre:ENCRE});
-  }
-  y += 3;
+  for (const groupe of grouperParCategorie(lignes)){
+    if (y > bas - 14) y = nouvelleFeuille(doc, contexte);
+    doc.setFillColor(...groupe.cat.couleur);
+    doc.rect(MARGE, y-2.8, 3, 3.2, "F");
+    doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
+    doc.text(groupe.cat.libelle + "  (" + groupe.membres.length + ")", MARGE+5, y);
+    y += 6;
 
-  for (const cat of CATEGORIES){
-    const cible = ancres.get(cat.cle);
-    if (!cible) continue;
-    y = ligneSommaire(doc, y, cat.libelle, stats.parCategorie[cat.cle], cible,
-                      {taille:8.5, encre:[61,61,58], couleur:cat.couleur});
-    for (const st of STATUTS){
-      const sous = ancres.get(cat.cle + "|" + st.cle);
-      if (!sous) continue;
-      y = ligneSommaire(doc, y, st.libelle, stats.croise[cat.cle][st.cle], sous,
-                        {taille:7.5, encre:ENCRE_STATUT[st.cle], decale:true});
+    for (const rang of RANGS){
+      for (const r of lignesDuRang(groupe.membres, rang)){
+        if (y > bas - 6) y = nouvelleFeuille(doc, contexte);
+        doc.setFontSize(7.5);
+        const morceaux = doc.splitTextToSize(texteCellule(r[m.id]), largeurTexte);
+        const texte = morceaux.length > 1
+          ? morceaux[0].replace(/\s+\S*$/, "") + "…"
+          : morceaux[0];
+        doc.setTextColor(61,61,58);
+        doc.text(texte, MARGE+5, y);
+        doc.setTextColor(...(ENCRE_STATUT[rang.cle] || ESTOMPE));
+        doc.text(rang.libelle, droite, y, {align:"right"});
+        const cible = ancres.get("ligne:" + r.id);
+        if (cible) doc.link(MARGE, y-3.4, droite-MARGE, 4.8, {pageNumber: cible.page, top: cible.top});
+        y += 5.2;
+      }
     }
     y += 2;
   }
-  return numeroFeuille;
+  return doc.internal.getNumberOfPages() - avant;
 }
 
-function decalerAncres(ancres, contexte){
+function decalerAncres(ancres, contexte, decalage){
+  const bouger = a => ({page: a.page >= 2 ? a.page + decalage : a.page, top: a.top});
   const decalees = new Map();
-  const bouger = a => ({page: a.page >= 2 ? a.page + 1 : a.page, top: a.top});
   for (const [cle, a] of ancres) decalees.set(cle, bouger(a));
   for (const cle of Object.keys(contexte.reperes)) contexte.reperes[cle] = bouger(contexte.reperes[cle]);
   return decalees;
@@ -1171,10 +1153,16 @@ async function editer(){
     if (evolution) curseur = pageEvolution(doc, contexte, evolution, curseur) + 6;
     let ancres = pageDetail(doc, contexte, lignes, curseur);
 
-    ancres = decalerAncres(ancres, contexte);
-    const feuilleSommaire = pageSommaire(doc, contexte, ancres, stats, evolution);
-    doc.movePage(feuilleSommaire, 2);
-    contexte.pages.splice(1, 0, contexte.pages.pop());
+    // Premier tracé pour connaître le nombre de pages du sommaire, puis tracé définitif
+    // avec les numéros de page décalés d'autant.
+    const avantSommaire = doc.internal.getNumberOfPages();
+    const nbSommaire = dessinerSommaire(doc, contexte, ancres, lignes);
+    for (let i = 0; i < nbSommaire; i++) doc.deletePage(doc.internal.getNumberOfPages());
+
+    ancres = decalerAncres(ancres, contexte, nbSommaire);
+    dessinerSommaire(doc, contexte, ancres, lignes);
+    for (let k = 0; k < nbSommaire; k++) doc.movePage(avantSommaire + 1 + k, 2 + k);
+    contexte.pages = new Array(doc.internal.getNumberOfPages()).fill("portrait");
 
     poserLiens(doc, synthese.zones, ancres);
     piedDePage(doc, contexte);
