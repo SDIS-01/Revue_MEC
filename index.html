@@ -83,7 +83,7 @@
 <fieldset>
   <legend>Comparaison</legend>
   <div class="ligne">
-    <label><input type="checkbox" id="avecEvolution" checked> Inclure l'évolution</label>
+    <label><input type="checkbox" id="avecEvolution"> Inclure l'évolution</label>
   </div>
   <div class="ligne"><label for="reference">Édition de référence</label><select id="reference"></select></div>
 </fieldset>
@@ -463,10 +463,17 @@ async function chargerEditions(){
   majLibelle();
 }
 
+function libelleEtendue(e){
+  if (e.perimetre === "groupement") return e.detail ? "Groupement " + e.detail : "Groupement";
+  if (e.perimetre === "portefeuille") return "Portefeuille complet";
+  return "";
+}
+
 function remplirEditions(){
   const sel = $("reference");
   sel.innerHTML = "";
   const perimetre = $("perimetre").value;
+  const detailCourant = perimetre === "groupement" ? $("groupement").value : "";
   const compatibles = etatApp.editions.filter(e => !e.perimetre || e.perimetre === perimetre);
   const liste = compatibles.length ? compatibles : etatApp.editions;
   if (!liste.length){
@@ -480,8 +487,11 @@ function remplirEditions(){
   liste.forEach((e, i) => {
     const o = document.createElement("option");
     o.value = String(e.ts);
+    const differe = e.perimetre !== perimetre ||
+                    (perimetre === "groupement" && (e.detail || "") !== detailCourant);
+    const etendue = libelleEtendue(e);
     o.textContent = (e.libelle ? e.libelle + " — " : "") + dateFr(e.ts) +
-                    (e.perimetre !== perimetre ? "  (autre périmètre)" : "");
+                    (differe && etendue ? "  (" + etendue + ")" : "");
     if (i === 0) o.selected = true;
     sel.appendChild(o);
   });
