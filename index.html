@@ -46,12 +46,13 @@
 <h1>Revue d'avancement</h1>
 <p class="sous">Édite un PDF de synthèse et enregistre l'état du portefeuille dans la table d'historique.</p>
 
-<fieldset>
-  <legend>Sources</legend>
+<fieldset id="blocSources" hidden>
+  <legend>Configuration</legend>
   <div class="ligne"><label for="tblSource">Table des données</label><select id="tblSource"></select></div>
   <div class="ligne"><label for="tblHisto">Table d'historique</label><select id="tblHisto"></select></div>
   <div class="grille" id="mapping"></div>
   <p class="aide" id="aideHisto"></p>
+  <div class="actions"><button id="btnFermerConfig">Fermer la configuration</button></div>
 </fieldset>
 
 <fieldset>
@@ -187,7 +188,18 @@ function message(txt, type){
 
 /* ---------- Chargement Grist ---------- */
 
-grist.ready({requiredAccess:"full"});
+grist.ready({
+  requiredAccess: "full",
+  onEditOptions: ouvrirConfiguration
+});
+
+/* Grist affiche « Ouvrir la configuration » dans le panneau latéral droit
+   dès qu'un rappel onEditOptions est fourni. */
+function ouvrirConfiguration(){
+  const bloc = $("blocSources");
+  bloc.hidden = false;
+  bloc.scrollIntoView({block:"start", behavior:"smooth"});
+}
 
 async function demarrer(){
   try{
@@ -1033,6 +1045,8 @@ $("recherche").addEventListener("input", e => {
     item.hidden = filtre && !item.dataset.cle.includes(filtre);
   }
 });
+
+$("btnFermerConfig").addEventListener("click", () => { $("blocSources").hidden = true; });
 
 $("btnEditer").addEventListener("click", editer);
 
