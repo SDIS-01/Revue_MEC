@@ -709,6 +709,46 @@ function pageSynthese(doc, contexte, stats, evolution){
   return blocFocus(doc, haut+84, stats);
 }
 
+function blocFocus(doc, y, stats){
+  doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
+  doc.text("Focus catégorie et statut", MARGE, y);
+
+  const cols = [
+    {cle:"a faire",    x: 80, l:30, titre:"À faire",    doux:ROUGE_CLAIR, encre:TEXTE_ROUGE, taille:8, principal:true},
+    {cle:"en cours",   x:112, l:30, titre:"En cours",   doux:JAUNE_CLAIR, encre:TEXTE_JAUNE, taille:8, principal:true},
+    {cle:"termine",    x:144, l:26, titre:"Terminé",    doux:VERT_CLAIR,  encre:TEXTE_VERT,  taille:7.5},
+    {cle:"interrompu", x:172, l:26, titre:"Interrompu", doux:GRIS_CLAIR,  encre:TEXTE_GRIS,  taille:7.5}
+  ];
+
+  for (const c of cols){
+    doc.setFontSize(c.taille); doc.setTextColor(...(c.principal ? GRIS : ESTOMPE));
+    doc.text(c.titre, c.x + c.l/2, y+7, {align:"center"});
+  }
+
+  const zones = [];
+  let ligne = y+11;
+  const hauteur = 9.5, pas = 11;
+  for (const cat of CATEGORIES){
+    zones.push({cle:cat.cle, statut:null, x:MARGE, y:ligne, l:66, h:hauteur});
+    doc.setFillColor(...cat.couleur);
+    doc.rect(MARGE, ligne+3.2, 3, 3, "F");
+    doc.setFontSize(7.5); doc.setTextColor(61,61,58);
+    doc.text(cat.libelle, MARGE+5, ligne+6.2);
+    for (const c of cols){
+      const n = stats.croise[cat.cle][c.cle];
+      const texte = n ? String(n) : "—";
+      doc.setFillColor(...c.doux);
+      doc.rect(c.x, ligne, c.l, hauteur, "F");
+      doc.setFontSize(c.principal ? 10 : 9);
+      doc.setTextColor(...(n ? c.encre : VIDE));
+      doc.text(texte, c.x + c.l/2, ligne+6.4, {align:"center"});
+      if (n) zones.push({cle:cat.cle, statut:c.cle, x:c.x, y:ligne, l:c.l, h:hauteur});
+    }
+    ligne += pas;
+  }
+  return {zones, y: ligne};
+}
+
 function pageEvolution(doc, contexte, evolution, depart){
   let y = assurerPlace(doc, contexte, depart, 34);
   const droite = droiteDe(doc), bas = basDe(doc);
