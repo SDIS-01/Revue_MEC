@@ -597,7 +597,12 @@ const basDe    = doc => doc.internal.pageSize.getHeight() - 16;
 function nouvelleFeuille(doc, contexte, orientation){
   doc.addPage("a4", orientation || "landscape");
   contexte.pages.push(orientation === "portrait" ? "portrait" : "landscape");
-  return enTete(doc, contexte);
+  const y = enTete(doc, contexte);
+  const droite = droiteDe(doc);
+  doc.setFontSize(7); doc.setTextColor(...ESTOMPE);
+  doc.text("Retour à la synthèse", droite, 23.5, {align:"right"});
+  doc.link(droite-26, 19.5, 26, 5, {pageNumber:1, top:0});
+  return y;
 }
 
 function enTete(doc, contexte){
@@ -701,7 +706,7 @@ function pageSynthese(doc, contexte, stats, evolution){
   })), 83);
 
   doc.line(MARGE, hautGraphes+48, DROITE, hautGraphes+48);
-  blocFocus(doc, hautGraphes+58, stats);
+  return blocFocus(doc, hautGraphes+58, stats);
 }
 
 function blocFocus(doc, y, stats){
@@ -720,9 +725,11 @@ function blocFocus(doc, y, stats){
     doc.text(c.titre, c.x + c.l/2, y+7, {align:"center"});
   }
 
+  const zones = [];
   let ligne = y+11;
   const hauteur = 9.5, pas = 11;
   for (const cat of CATEGORIES){
+    zones.push({cle:cat.cle, statut:null, x:MARGE, y:ligne, l:104, h:hauteur});
     doc.setFillColor(...cat.couleur);
     doc.rect(MARGE, ligne+3.2, 3, 3, "F");
     doc.setFontSize(7.5); doc.setTextColor(61,61,58);
@@ -737,9 +744,11 @@ function blocFocus(doc, y, stats){
         doc.setTextColor(...(n ? c.encre : VIDE));
       }
       doc.text(texte, c.x + c.l/2, ligne+6.4, {align:"center"});
+      if (n) zones.push({cle:cat.cle, statut:c.cle, x:c.x, y:ligne, l:c.l, h:hauteur});
     }
     ligne += pas;
   }
+  return zones;
 }
 
 function pageEvolution(doc, contexte, evolution){
@@ -894,7 +903,9 @@ function valeurColonne(r, colonne){
 }
 
 function pageDetail(doc, contexte, lignes){
-  const choisies = etatApp.colonnesChoisies.length ? etatApp.colonnesChoisies : [etatApp.mapping.id];
+  const m = etatApp.mapping;
+  const choisies = etatApp.colonnesChoisies.length ? etatApp.colonnesChoisies : [m.id];
+  const ancres = new Map();
 
   let y = nouvelleFeuille(doc, contexte, "portrait");
   const droite = droiteDe(doc), bas = basDe(doc);
@@ -911,32 +922,84 @@ function pageDetail(doc, contexte, lignes){
 
   doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
   doc.text("Détail des recommandations", MARGE, y);
-  y = enTeteTableau(doc, colonnes, y+4);
+  y += 10;
 
-  const champAvancement = etatApp.mapping.avancement;
-  const champStatut = etatApp.mapping.statut;
-  for (const r of lignes){
-    const cellules = colonnes.map(c =>
-      c.colonne === champAvancement ? [""] : doc.splitTextToSize(valeurColonne(r, c.colonne), c.l));
-    const hauteur = Math.max(6, Math.max(...cellules.map(t => t.length))*3.6 + 2.4);
-    if (y + hauteur > bas){
-      y = nouvelleFeuille(doc, contexte, "portrait");
-      y = enTeteTableau(doc, colonnes, y);
-    }
-    const statut = statutDe(r[etatApp.mapping.statut]);
-    colonnes.forEach((c, i) => {
-      if (c.colonne === champAvancement){
-        bulleAvancement(doc, c.x, y+0.4, avancementDe(r), statut, c.l);
-      } else {
-        doc.setFontSize(7.5);
-        const encre = (c.colonne === champStatut && statut) ? ENCRE_STATUT[statut.cle] : [61,61,58];
-        doc.setTextColor(...encre);
-        doc.text(cellules[i], c.x, y+4);
+  const groupes = [];
+  for (const cat of CATEGORIES){
+    const membres = lignes.filter(r => { const c = categorieDe(r[m.categorie]); return c && c.cle === cat.cle; });
+    if (membres.length) groupes.push({cat, membres});
+  }
+  const orphelines = lignes.filter(r => !categorieDe(r[m.categorie]));
+  if (orphelines.length){
+    groupes.push({cat:{cle:"autres", libelle:"Catégorie non reconnue", couleur:ESTOMPE}, membres:orphelines});
+  }
+
+  const rangs = [...STATUTS, {cle:"autre", libelle:"Statut non reconnu"}];
+
+  for (const groupe of groupes){
+    if (y > bas - 32){ y = nouvelleFeuille(doc, contexte, "portrait"); }
+    ancres.set(groupe.cat.cle, {page: contexte.pages.length, top: Math.max(0, y-8)});
+
+    doc.setFillColor(...groupe.cat.couleur);
+    doc.rect(MARGE, y-3.2, 3, 3.6, "F");
+    doc.setFontSize(9); doc.setTextColor(...ENCRE);
+    doc.text(groupe.cat.libelle + "  (" + groupe.membres.length + ")", MARGE+5, y);
+    y += 4;
+    y = enTeteTableau(doc, colonnes, y);
+
+    for (const rang of rangs){
+      const sous = groupe.membres.filter(r => {
+        const st = statutDe(r[m.statut]);
+        return rang.cle === "autre" ? !st : (st && st.cle === rang.cle);
+      });
+      if (!sous.length) continue;
+
+      if (y > bas - 18){
+        y = nouvelleFeuille(doc, contexte, "portrait");
+        y = enTeteTableau(doc, colonnes, y);
       }
-    });
-    y += hauteur;
-    doc.setDrawColor(237,235,228); doc.setLineWidth(0.15);
-    doc.line(MARGE, y, droite, y);
+      ancres.set(groupe.cat.cle + "|" + rang.cle, {page: contexte.pages.length, top: Math.max(0, y-8)});
+
+      doc.setFontSize(7);
+      doc.setTextColor(...(ENCRE_STATUT[rang.cle] || ESTOMPE));
+      doc.text(rang.libelle + " — " + sous.length, MARGE, y+3);
+      y += 6;
+
+      for (const r of sous){
+        const cellules = colonnes.map(c =>
+          c.colonne === m.avancement ? [""] : doc.splitTextToSize(valeurColonne(r, c.colonne), c.l));
+        const hauteur = Math.max(6, Math.max(...cellules.map(t => t.length))*3.6 + 2.4);
+        if (y + hauteur > bas){
+          y = nouvelleFeuille(doc, contexte, "portrait");
+          y = enTeteTableau(doc, colonnes, y);
+        }
+        const statut = statutDe(r[m.statut]);
+        colonnes.forEach((c, i) => {
+          if (c.colonne === m.avancement){
+            bulleAvancement(doc, c.x, y+0.4, avancementDe(r), statut, c.l);
+          } else {
+            doc.setFontSize(7.5);
+            doc.setTextColor(...((c.colonne === m.statut && statut) ? ENCRE_STATUT[statut.cle] : [61,61,58]));
+            doc.text(cellules[i], c.x, y+4);
+          }
+        });
+        y += hauteur;
+        doc.setDrawColor(237,235,228); doc.setLineWidth(0.15);
+        doc.line(MARGE, y, droite, y);
+      }
+      y += 3;
+    }
+    y += 6;
+  }
+  return ancres;
+}
+
+function poserLiens(doc, zones, ancres){
+  doc.setPage(1);
+  for (const z of zones){
+    const cle = z.statut ? z.cle + "|" + z.statut : z.cle;
+    const cible = ancres.get(cle);
+    if (cible) doc.link(z.x, z.y, z.l, z.h, {pageNumber: cible.page, top: cible.top});
   }
 }
 
@@ -1004,9 +1067,10 @@ async function editer(){
 
     const {jsPDF} = window.jspdf;
     const doc = new jsPDF({orientation:"landscape", unit:"mm", format:"a4"});
-    pageSynthese(doc, contexte, stats, evolution);
+    const zones = pageSynthese(doc, contexte, stats, evolution);
     if (evolution) pageEvolution(doc, contexte, evolution);
-    pageDetail(doc, contexte, lignes);
+    const ancres = pageDetail(doc, contexte, lignes);
+    poserLiens(doc, zones, ancres);
     piedDePage(doc, contexte);
 
     await enregistrerRevue(lignes, contexte);
