@@ -589,14 +589,14 @@ function dessinerCamembert(segments, total){
 
 /* ---------- Mise en page PDF ---------- */
 
-const MARGE = 12, DROITE = 285;   // DROITE : page de synthèse, en paysage
+const MARGE = 12;
 
 const droiteDe = doc => doc.internal.pageSize.getWidth() - MARGE;
 const basDe    = doc => doc.internal.pageSize.getHeight() - 16;
 
 function nouvelleFeuille(doc, contexte, orientation){
-  doc.addPage("a4", orientation || "landscape");
-  contexte.pages.push(orientation === "portrait" ? "portrait" : "landscape");
+  doc.addPage("a4", orientation || "portrait");
+  contexte.pages.push(orientation === "landscape" ? "landscape" : "portrait");
   const y = enTete(doc, contexte);
   const droite = droiteDe(doc);
   doc.setFontSize(7); doc.setTextColor(...ESTOMPE);
@@ -652,6 +652,7 @@ function legende(doc, x, y, entrees, largeur){
 
 function pageSynthese(doc, contexte, stats, evolution){
   let y = enTete(doc, contexte);
+  const droite = droiteDe(doc);
 
   doc.setFontSize(8); doc.setTextColor(...GRIS);
   doc.text("Avancement global", MARGE, y);
@@ -671,84 +672,41 @@ function pageSynthese(doc, contexte, stats, evolution){
              MARGE, y+22);
   }
 
-  const largeurCadre = 37, pas = 41;
-  let x = DROITE - 4*largeurCadre - 3*(pas-largeurCadre);
+  let x = MARGE;
   for (const s of STATUTS){
-    cadreValeur(doc, x, y-2, largeurCadre, 20, s.libelle, String(stats.parStatut[s.cle]),
+    cadreValeur(doc, x, y+28, 44, 18, s.libelle, String(stats.parStatut[s.cle]),
                 s.cle === "en cours" ? [154,122,0] : s.couleur);
-    x += pas;
+    x += 46.5;
   }
 
   doc.setDrawColor(...TRAIT); doc.setLineWidth(0.2);
-  doc.line(MARGE, y+30, DROITE, y+30);
+  doc.line(MARGE, y+54, droite, y+54);
 
-  const hautGraphes = y+40;
+  const haut = y+64, milieu = 105;
   doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
-  doc.text("Répartition par statut", MARGE, hautGraphes);
-  doc.text("Répartition par catégorie", 156, hautGraphes);
+  doc.text("Répartition par statut", MARGE, haut);
+  doc.text("Répartition par catégorie", milieu+6, haut);
 
   const segStatut = STATUTS.map(s => ({valeur: stats.parStatut[s.cle], couleur: s.couleur}));
   const segCategorie = CATEGORIES.map(c => ({valeur: stats.parCategorie[c.cle], couleur: c.couleur}));
   if (stats.total){
-    doc.addImage(dessinerCamembert(segStatut, stats.total), "PNG", 21, hautGraphes+4, 30, 30);
-    doc.addImage(dessinerCamembert(segCategorie, stats.total), "PNG", 165, hautGraphes+4, 30, 30);
+    doc.addImage(dessinerCamembert(segStatut, stats.total), "PNG", 41.5, haut+4, 28, 28);
+    doc.addImage(dessinerCamembert(segCategorie, stats.total), "PNG", 140.5, haut+4, 28, 28);
   }
 
-  legende(doc, 58, hautGraphes+11, STATUTS.map(s => ({
+  legende(doc, MARGE, haut+42, STATUTS.map(s => ({
     libelle: s.libelle, couleur: s.couleur, valeur: String(stats.parStatut[s.cle])
-  })), 84);
+  })), 87);
 
   doc.setDrawColor(...TRAIT);
-  doc.line(148, hautGraphes-4, 148, hautGraphes+40);
+  doc.line(milieu, haut-6, milieu, haut+68);
 
-  legende(doc, 202, hautGraphes+11, CATEGORIES.map(c => ({
+  legende(doc, milieu+6, haut+42, CATEGORIES.map(c => ({
     libelle: c.libelle, couleur: c.couleur, valeur: String(stats.parCategorie[c.cle])
-  })), 83);
+  })), 87);
 
-  doc.line(MARGE, hautGraphes+48, DROITE, hautGraphes+48);
-  return blocFocus(doc, hautGraphes+58, stats);
-}
-
-function blocFocus(doc, y, stats){
-  doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
-  doc.text("Focus catégorie et statut", MARGE, y);
-
-  const cols = [
-    {cle:"a faire",    x:118, l:46, titre:"À faire",    doux:ROUGE_CLAIR, encre:TEXTE_ROUGE, taille:8, principal:true},
-    {cle:"en cours",   x:166, l:46, titre:"En cours",   doux:JAUNE_CLAIR, encre:TEXTE_JAUNE, taille:8, principal:true},
-    {cle:"termine",    x:214, l:34, titre:"Terminé",    doux:VERT_CLAIR,  encre:TEXTE_VERT,  taille:7.5},
-    {cle:"interrompu", x:250, l:35, titre:"Interrompu", doux:GRIS_CLAIR,  encre:TEXTE_GRIS,  taille:7.5}
-  ];
-
-  for (const c of cols){
-    doc.setFontSize(c.taille); doc.setTextColor(...(c.principal ? GRIS : ESTOMPE));
-    doc.text(c.titre, c.x + c.l/2, y+7, {align:"center"});
-  }
-
-  const zones = [];
-  let ligne = y+11;
-  const hauteur = 9.5, pas = 11;
-  for (const cat of CATEGORIES){
-    zones.push({cle:cat.cle, statut:null, x:MARGE, y:ligne, l:104, h:hauteur});
-    doc.setFillColor(...cat.couleur);
-    doc.rect(MARGE, ligne+3.2, 3, 3, "F");
-    doc.setFontSize(7.5); doc.setTextColor(61,61,58);
-    doc.text(cat.libelle, MARGE+5, ligne+6.2);
-    for (const c of cols){
-      const n = stats.croise[cat.cle][c.cle];
-      const texte = n ? String(n) : "—";
-      {
-        doc.setFillColor(...c.doux);
-        doc.rect(c.x, ligne, c.l, hauteur, "F");
-        doc.setFontSize(c.principal ? 10 : 9);
-        doc.setTextColor(...(n ? c.encre : VIDE));
-      }
-      doc.text(texte, c.x + c.l/2, ligne+6.4, {align:"center"});
-      if (n) zones.push({cle:cat.cle, statut:c.cle, x:c.x, y:ligne, l:c.l, h:hauteur});
-    }
-    ligne += pas;
-  }
-  return zones;
+  doc.line(MARGE, haut+74, droite, haut+74);
+  return blocFocus(doc, haut+86, stats);
 }
 
 function pageEvolution(doc, contexte, evolution){
@@ -794,6 +752,7 @@ function pageEvolution(doc, contexte, evolution){
     doc.text(section.titre + " (" + section.items.length + ")", MARGE, y+4);
     y += 8;
     for (const item of section.items){
+      doc.setFontSize(7.5);
       const libelle = texteCellule(item.r[m.id]);
       const lignes = doc.splitTextToSize(libelle, colonnes[0].l-2);
       const hauteur = Math.max(6, lignes.length*3.6 + 2.4);
@@ -826,6 +785,7 @@ function pageEvolution(doc, contexte, evolution){
     doc.text("Sorties du périmètre (" + evolution.sorties.length + ")", MARGE, y+4);
     y += 8;
     for (const s of evolution.sorties){
+      doc.setFontSize(7.5);
       const lignes = doc.splitTextToSize(texteCellule(s.id), droite-MARGE-2);
       const hauteur = Math.max(6, lignes.length*3.6 + 2.4);
       if (y + hauteur > bas) y = nouvelleFeuille(doc, contexte, "portrait");
@@ -873,7 +833,8 @@ function pastilleStatut(doc, x, y, statut){
 
 function enTeteTableau(doc, colonnes, y){
   doc.setFontSize(7.5);
-  const titres = colonnes.map(c => doc.splitTextToSize(c.titre, c.l).slice(0,2));
+  const titres = colonnes.map(c =>
+    doc.splitTextToSize(String(c.titre).replace(/_/g, "_ "), c.l).slice(0,2).map(t => t.trim()));
   const nbLignes = Math.max(1, ...titres.map(t => t.length));
   const hauteur = 3.6 + nbLignes*3.4;
   doc.setFillColor(...FOND);
@@ -966,6 +927,7 @@ function pageDetail(doc, contexte, lignes){
       y += 6;
 
       for (const r of sous){
+        doc.setFontSize(7.5);
         const cellules = colonnes.map(c =>
           c.colonne === m.avancement ? [""] : doc.splitTextToSize(valeurColonne(r, c.colonne), c.l));
         const hauteur = Math.max(6, Math.max(...cellules.map(t => t.length))*3.6 + 2.4);
@@ -1055,7 +1017,7 @@ async function editer(){
       libellePerimetre,
       horodatage: Math.floor(Date.now()/1000),
       dateEdition: dateFr(Math.floor(Date.now()/1000)),
-      pages: ["landscape"]
+      pages: ["portrait"]
     };
 
     const stats = calculer(lignes);
@@ -1066,7 +1028,7 @@ async function editer(){
     }
 
     const {jsPDF} = window.jspdf;
-    const doc = new jsPDF({orientation:"landscape", unit:"mm", format:"a4"});
+    const doc = new jsPDF({orientation:"portrait", unit:"mm", format:"a4"});
     const zones = pageSynthese(doc, contexte, stats, evolution);
     if (evolution) pageEvolution(doc, contexte, evolution);
     const ancres = pageDetail(doc, contexte, lignes);
