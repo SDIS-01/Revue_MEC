@@ -871,6 +871,12 @@ function pastilleStatut(doc, x, y, statut){
   doc.text(statut.libelle, x+2, y+3.5);
 }
 
+function tracerFilet(doc, couleur, y1, y2){
+  if (y2 <= y1) return;
+  doc.setFillColor(...couleur);
+  doc.rect(MARGE-2.4, y1, 1, y2-y1, "F");
+}
+
 function assurerPlace(doc, contexte, y, besoin){
   return (y + besoin > basDe(doc)) ? nouvelleFeuille(doc, contexte) : y;
 }
@@ -965,19 +971,24 @@ function pageDetail(doc, contexte, lignes, depart){
       }
       ancres.set(groupe.cat.cle + "|" + rang.cle, {page: contexte.pages.length, top: Math.max(0, y-8)});
 
+      doc.setFillColor(...(FOND_STATUT[rang.cle] || FOND));
+      doc.rect(MARGE, y-0.6, droite-MARGE, 5.8, "F");
       doc.setFontSize(7);
       doc.setTextColor(...(ENCRE_STATUT[rang.cle] || ESTOMPE));
-      doc.text(rang.libelle + " — " + sous.length, MARGE, y+3);
-      y += 6;
+      doc.text(rang.libelle + " — " + sous.length, MARGE+2, y+3.4);
+      y += 8;
 
+      let filet = y;
       for (const r of sous){
         doc.setFontSize(7.5);
         const cellules = colonnes.map(c =>
           c.colonne === m.avancement ? [""] : doc.splitTextToSize(valeurColonne(r, c.colonne), c.l));
         const hauteur = Math.max(6, Math.max(...cellules.map(t => t.length))*3.4 + 2.2);
         if (y + hauteur > bas){
+          tracerFilet(doc, groupe.cat.couleur, filet, y);
           y = nouvelleFeuille(doc, contexte);
           y = enTeteTableau(doc, colonnes, y);
+          filet = y;
         }
         const statut = statutDe(r[m.statut]);
         colonnes.forEach((c, i) => {
@@ -993,6 +1004,7 @@ function pageDetail(doc, contexte, lignes, depart){
         doc.setDrawColor(237,235,228); doc.setLineWidth(0.15);
         doc.line(MARGE, y, droite, y);
       }
+      tracerFilet(doc, groupe.cat.couleur, filet, y);
       y += 2;
     }
     y += 4;
