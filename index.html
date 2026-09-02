@@ -118,6 +118,7 @@ const STATUTS = [
   {cle:"a faire",    libelle:"À faire",    couleur:[192, 80, 77]}
 ];
 
+const ROUGE_CLAIR = [251,235,235], TEXTE_ROUGE = [153, 51, 51];
 const VERT_CLAIR  = [234,243,222], TEXTE_VERT  = [79,115, 20];
 const JAUNE_CLAIR = [255,248,219], TEXTE_JAUNE = [122, 96,  0];
 const GRIS_CLAIR  = [241,239,232], TEXTE_GRIS  = [122,121,115];
@@ -213,17 +214,74 @@ function remplirSelect(sel, valeurs, choisie){
   }
 }
 
+/* Les colonnes de type Référence contiennent des identifiants de ligne.
+   On construit ici, pour chacune, la table de correspondance vers la valeur affichée. */
+async function resolveursReference(tableSource){
+  const resolveurs = {};
+  try{
+    const tables = await grist.docApi.fetchTable("_grist_Tables");
+    const cols   = await grist.docApi.fetchTable("_grist_Tables_column");
+
+    let refTable = null;
+    for (let i=0; i<tables.id.length; i++){
+      if (tables.tableId[i] === tableSource) refTable = tables.id[i];
+    }
+    if (refTable === null) return resolveurs;
+
+    const nomTable = new Map();
+    for (let i=0; i<tables.id.length; i++) nomTable.set(tables.id[i], tables.tableId[i]);
+    const nomColonne = new Map();
+    for (let i=0; i<cols.id.length; i++) nomColonne.set(cols.id[i], cols.colId[i]);
+
+    for (let i=0; i<cols.id.length; i++){
+      if (cols.parentId[i] !== refTable) continue;
+      const type = String(cols.type[i] || "");
+      const m = type.match(/^Ref(List)?:(.+)$/);
+      if (!m) continue;
+      const cible = m[2];
+      const visible = cols.visibleCol ? nomColonne.get(cols.visibleCol[i]) : null;
+      let donneesCible;
+      try{ donneesCible = await grist.docApi.fetchTable(cible); }
+      catch(e){ continue; }
+      const source = visible && donneesCible[visible] ? donneesCible[visible] : null;
+      const carte = new Map();
+      for (let j=0; j<donneesCible.id.length; j++){
+        carte.set(donneesCible.id[j], source ? source[j] : donneesCible.id[j]);
+      }
+      resolveurs[cols.colId[i]] = {carte, liste: Boolean(m[1])};
+    }
+  }catch(e){ /* métadonnées inaccessibles : on garde les valeurs brutes */ }
+  return resolveurs;
+}
+
+function appliquerResolveur(valeur, resolveur){
+  if (!resolveur) return valeur;
+  const lire = v => {
+    if (v === 0 || v === null || v === undefined) return "";
+    const t = resolveur.carte.get(v);
+    return t === undefined ? v : t;
+  };
+  if (resolveur.liste){
+    if (!Array.isArray(valeur)) return "";
+    return valeur.slice(1).map(lire).filter(v => v !== "").join(", ");
+  }
+  return lire(valeur);
+}
+
 async function chargerSource(){
   const table = $("tblSource").value;
   if (!table) return;
   const donnees = await grist.docApi.fetchTable(table);
-  const colonnes = Object.keys(donnees).filter(c => c !== "manualSort");
+  const colonnes = Object.keys(donnees).filter(c => c !== "manualSort" && !c.startsWith("gristHelper_"));
   etatApp.colonnesSource = colonnes.filter(c => c !== "id");
+  const resolveurs = await resolveursReference(table);
   const n = donnees.id.length;
   etatApp.enregistrements = [];
   for (let i=0; i<n; i++){
     const r = {id: donnees.id[i]};
-    for (const c of etatApp.colonnesSource) r[c] = donnees[c][i];
+    for (const c of etatApp.colonnesSource){
+      r[c] = appliquerResolveur(donnees[c][i], resolveurs[c]);
+    }
     etatApp.enregistrements.push(r);
   }
   construireMapping();
@@ -519,11 +577,14 @@ function dessinerCamembert(segments, total){
 
 /* ---------- Mise en page PDF ---------- */
 
-const MARGE = 12, DROITE = 285, BAS = 196;
+const MARGE = 12, DROITE = 285;   // DROITE : page de synthèse, en paysage
 
-function nouvelleFeuille(doc, contexte){
-  doc.addPage();
-  contexte.page++;
+const droiteDe = doc => doc.internal.pageSize.getWidth() - MARGE;
+const basDe    = doc => doc.internal.pageSize.getHeight() - 16;
+
+function nouvelleFeuille(doc, contexte, orientation){
+  doc.addPage("a4", orientation || "landscape");
+  contexte.pages.push(orientation === "portrait" ? "portrait" : "landscape");
   return enTete(doc, contexte);
 }
 
@@ -535,7 +596,7 @@ function enTete(doc, contexte){
   doc.setFontSize(8); doc.setTextColor(...ESTOMPE);
   doc.text("Édition du " + contexte.dateEdition + " — " + contexte.libellePerimetre, 48, 23);
   doc.setFillColor(...ROUGE);
-  doc.rect(MARGE, 28, DROITE-MARGE, 1.1, "F");
+  doc.rect(MARGE, 28, droiteDe(doc)-MARGE, 1.1, "F");
   return 38;
 }
 
@@ -543,8 +604,10 @@ function piedDePage(doc, contexte){
   const total = doc.getNumberOfPages();
   for (let p=1; p<=total; p++){
     doc.setPage(p);
-    doc.setFontSize(7.5); doc.setTextColor(...VIDE);
-    doc.text(String(p), 148.5, 202, {align:"center"});
+    const portrait = contexte.pages[p-1] === "portrait";
+    const largeur = portrait ? 210 : 297, hauteur = portrait ? 297 : 210;
+    doc.setFontSize(7.5); doc.setTextColor(...ESTOMPE);
+    doc.text("Page " + p + " / " + total, largeur/2, hauteur-8, {align:"center"});
   }
 }
 
@@ -615,16 +678,14 @@ function pageSynthese(doc, contexte, stats, evolution){
   }
 
   legende(doc, 58, hautGraphes+11, STATUTS.map(s => ({
-    libelle: s.libelle, couleur: s.couleur,
-    valeur: stats.parStatut[s.cle] + " (" + pourcent(stats.total ? stats.parStatut[s.cle]/stats.total : 0) + ")"
+    libelle: s.libelle, couleur: s.couleur, valeur: String(stats.parStatut[s.cle])
   })), 84);
 
   doc.setDrawColor(...TRAIT);
   doc.line(148, hautGraphes-4, 148, hautGraphes+40);
 
   legende(doc, 202, hautGraphes+11, CATEGORIES.map(c => ({
-    libelle: c.libelle, couleur: c.couleur,
-    valeur: stats.parCategorie[c.cle] + " (" + pourcent(stats.total ? stats.parCategorie[c.cle]/stats.total : 0) + ")"
+    libelle: c.libelle, couleur: c.couleur, valeur: String(stats.parCategorie[c.cle])
   })), 83);
 
   doc.line(MARGE, hautGraphes+48, DROITE, hautGraphes+48);
@@ -636,7 +697,7 @@ function blocFocus(doc, y, stats){
   doc.text("Focus catégorie et statut", MARGE, y);
 
   const cols = [
-    {cle:"a faire",    x:118, l:46, titre:"À faire",    teinte:true, taille:8, principal:true},
+    {cle:"a faire",    x:118, l:46, titre:"À faire",    doux:ROUGE_CLAIR, encre:TEXTE_ROUGE, taille:8, principal:true},
     {cle:"en cours",   x:166, l:46, titre:"En cours",   doux:JAUNE_CLAIR, encre:TEXTE_JAUNE, taille:8, principal:true},
     {cle:"termine",    x:214, l:34, titre:"Terminé",    doux:VERT_CLAIR,  encre:TEXTE_VERT,  taille:7.5},
     {cle:"interrompu", x:250, l:35, titre:"Interrompu", doux:GRIS_CLAIR,  encre:TEXTE_GRIS,  taille:7.5}
@@ -650,28 +711,18 @@ function blocFocus(doc, y, stats){
   let ligne = y+11;
   const hauteur = 9.5, pas = 11;
   for (const cat of CATEGORIES){
+    doc.setFillColor(...cat.couleur);
+    doc.rect(MARGE, ligne+3.2, 3, 3, "F");
     doc.setFontSize(7.5); doc.setTextColor(61,61,58);
-    doc.text(cat.libelle, MARGE, ligne+6.2);
+    doc.text(cat.libelle, MARGE+5, ligne+6.2);
     for (const c of cols){
       const n = stats.croise[cat.cle][c.cle];
       const texte = n ? String(n) : "—";
-      if (c.doux){
+      {
         doc.setFillColor(...c.doux);
         doc.rect(c.x, ligne, c.l, hauteur, "F");
         doc.setFontSize(c.principal ? 10 : 9);
         doc.setTextColor(...(n ? c.encre : VIDE));
-      } else {
-        if (n){
-          doc.setFillColor(...melangerBlanc(cat.couleur, 0.10));
-          doc.setDrawColor(...cat.couleur); doc.setLineWidth(0.4);
-          doc.rect(c.x, ligne, c.l, hauteur, "FD");
-          doc.setTextColor(...cat.couleur);
-        } else {
-          doc.setDrawColor(...FOND); doc.setLineWidth(0.2);
-          doc.rect(c.x, ligne, c.l, hauteur, "S");
-          doc.setTextColor(...VIDE);
-        }
-        doc.setFontSize(10);
       }
       doc.text(texte, c.x + c.l/2, ligne+6.4, {align:"center"});
     }
@@ -680,16 +731,17 @@ function blocFocus(doc, y, stats){
 }
 
 function pageEvolution(doc, contexte, evolution){
-  let y = nouvelleFeuille(doc, contexte);
+  let y = nouvelleFeuille(doc, contexte, "portrait");
+  const droite = droiteDe(doc), bas = basDe(doc);
   doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
   doc.text("Évolution depuis la revue du " + dateFr(evolution.edition.ts), MARGE, y);
   y += 8;
 
   const colonnes = [
-    {titre:"Recommandation", x:MARGE, l:150},
-    {titre:"Statut",         x:164,   l:34},
-    {titre:"Avancement",     x:200,   l:26},
-    {titre:"Évolution",      x:228,   l:57}
+    {titre:"Recommandation", x:MARGE, l:94},
+    {titre:"Statut",         x:108,   l:26},
+    {titre:"Avct",           x:136,   l:22},
+    {titre:"Évolution",      x:160,   l:38}
   ];
   y = enTeteTableau(doc, colonnes, y);
 
@@ -702,7 +754,7 @@ function pageEvolution(doc, contexte, evolution){
   const m = etatApp.mapping;
   for (const section of sections){
     if (!section.items.length) continue;
-    if (y > BAS-14){ y = nouvelleFeuille(doc, contexte); y = enTeteTableau(doc, colonnes, y); }
+    if (y > bas-14){ y = nouvelleFeuille(doc, contexte, "portrait"); y = enTeteTableau(doc, colonnes, y); }
     doc.setFontSize(7.5); doc.setTextColor(...GRIS);
     doc.text(section.titre + " (" + section.items.length + ")", MARGE, y+4);
     y += 8;
@@ -710,37 +762,38 @@ function pageEvolution(doc, contexte, evolution){
       const libelle = texteCellule(item.r[m.id]);
       const lignes = doc.splitTextToSize(libelle, colonnes[0].l-2);
       const hauteur = Math.max(6, lignes.length*3.6 + 2.4);
-      if (y + hauteur > BAS){ y = nouvelleFeuille(doc, contexte); y = enTeteTableau(doc, colonnes, y); }
+      if (y + hauteur > bas){ y = nouvelleFeuille(doc, contexte, "portrait"); y = enTeteTableau(doc, colonnes, y); }
       doc.setFontSize(7.5); doc.setTextColor(61,61,58);
       doc.text(lignes, colonnes[0].x, y+4);
       pastilleStatut(doc, colonnes[1].x, y+0.6, statutDe(item.r[m.statut]));
-      doc.setTextColor(61,61,58);
-      doc.text(pourcent(item.actuel), colonnes[2].x, y+4);
+      bulleAvancement(doc, colonnes[2].x, y+0.6, item.actuel, statutDe(item.r[m.statut]), colonnes[2].l);
       if (section.type === "variation"){
         const hausse = item.actuel > item.ancien;
-        doc.setTextColor(...(hausse ? [59,109,17] : [153,51,51]));
-        doc.text((hausse ? "▲ " : "▼ ") + entier(item.ancien*100) + " → " + entier(item.actuel*100),
-                 colonnes[3].x, y+4);
+        const teinte = hausse ? [59,109,17] : [153,51,51];
+        fleche(doc, colonnes[3].x, y+3.2, hausse, teinte);
+        doc.setTextColor(...teinte);
+        doc.text(entier(item.ancien*100) + " -> " + entier(item.actuel*100),
+                 colonnes[3].x+5, y+4);
       } else {
         doc.setTextColor(...ESTOMPE);
         doc.text("nouvelle", colonnes[3].x, y+4);
       }
       y += hauteur;
       doc.setDrawColor(237,235,228); doc.setLineWidth(0.15);
-      doc.line(MARGE, y, DROITE, y);
+      doc.line(MARGE, y, droite, y);
     }
     y += 4;
   }
 
   if (evolution.sorties.length){
-    if (y > BAS-14) y = nouvelleFeuille(doc, contexte);
+    if (y > bas-14) y = nouvelleFeuille(doc, contexte, "portrait");
     doc.setFontSize(7.5); doc.setTextColor(...GRIS);
     doc.text("Sorties du périmètre (" + evolution.sorties.length + ")", MARGE, y+4);
     y += 8;
     for (const s of evolution.sorties){
-      const lignes = doc.splitTextToSize(texteCellule(s.id), DROITE-MARGE-2);
+      const lignes = doc.splitTextToSize(texteCellule(s.id), droite-MARGE-2);
       const hauteur = Math.max(6, lignes.length*3.6 + 2.4);
-      if (y + hauteur > BAS) y = nouvelleFeuille(doc, contexte);
+      if (y + hauteur > bas) y = nouvelleFeuille(doc, contexte, "portrait");
       doc.setTextColor(...ESTOMPE);
       doc.text(lignes, MARGE, y+4);
       y += hauteur;
@@ -749,54 +802,111 @@ function pageEvolution(doc, contexte, evolution){
   return y;
 }
 
+function fleche(doc, x, y, hausse, couleur){
+  doc.setFillColor(...couleur);
+  if (hausse) doc.triangle(x, y+2.6, x+3, y+2.6, x+1.5, y, "F");
+  else        doc.triangle(x, y,     x+3, y,     x+1.5, y+2.6, "F");
+}
+
+function couleurAvancement(av, statut){
+  if (statut && statut.cle === "interrompu") return {fond:[237,235,228], encre:[ 89, 89, 89]};
+  if (av >= 0.999)                           return {fond:[234,243,222], encre:[ 59,109, 17]};
+  if (av >= 0.5)                             return {fond:[255,248,219], encre:[122, 96,  0]};
+  if (av > 0)                                return {fond:[253,238,225], encre:[166, 88, 20]};
+  return {fond:[251,235,235], encre:[153, 51, 51]};
+}
+
+function bulleAvancement(doc, x, y, av, statut, largeur){
+  const c = couleurAvancement(av, statut);
+  const l = Math.min(largeur, 12);
+  doc.setFillColor(...c.fond);
+  doc.roundedRect(x, y, l, 5, 1.6, 1.6, "F");
+  doc.setFontSize(7); doc.setTextColor(...c.encre);
+  doc.text(entier(av*100) + " %", x + l/2, y+3.5, {align:"center"});
+}
+
+const FOND_STATUT  = {termine:[237,245,224], "en cours":[255,248,219], interrompu:[241,239,232], "a faire":[251,235,235]};
+const ENCRE_STATUT = {termine:[ 59,109, 17], "en cours":[122, 96,  0], interrompu:[102,102, 96], "a faire":[153, 51, 51]};
+
 function pastilleStatut(doc, x, y, statut){
   if (!statut) return;
-  const fonds = {termine:[237,245,224], "en cours":[255,248,219], interrompu:[241,239,232], "a faire":[251,235,235]};
-  const encres = {termine:[59,109,17], "en cours":[122,96,0], interrompu:[102,102,96], "a faire":[153,51,51]};
-  doc.setFillColor(...fonds[statut.cle]);
+  doc.setFillColor(...FOND_STATUT[statut.cle]);
   doc.roundedRect(x, y, 22, 5, 0.8, 0.8, "F");
-  doc.setFontSize(7); doc.setTextColor(...encres[statut.cle]);
+  doc.setFontSize(7); doc.setTextColor(...ENCRE_STATUT[statut.cle]);
   doc.text(statut.libelle, x+2, y+3.5);
 }
 
 function enTeteTableau(doc, colonnes, y){
   doc.setFillColor(...FOND);
-  doc.rect(MARGE, y, DROITE-MARGE, 7, "F");
+  doc.rect(MARGE, y, droiteDe(doc)-MARGE, 7, "F");
   doc.setFontSize(7.5); doc.setTextColor(...GRIS);
   for (const c of colonnes) doc.text(c.titre, c.x, y+4.8);
   return y+10;
 }
 
+function poidsColonne(colonne){
+  const m = etatApp.mapping;
+  if (colonne === m.id)         return 3.2;
+  if (colonne === m.avancement) return 0.7;
+  if (colonne === m.statut)     return 0.8;
+  if (colonne === m.categorie)  return 1.3;
+  if (colonne === m.groupement || colonne === m.porteur) return 0.8;
+  return 2.4;
+}
+
+function titreColonne(colonne){
+  return colonne === etatApp.mapping.avancement ? "Avct" : colonne;
+}
+
+function valeurColonne(r, colonne){
+  if (colonne === etatApp.mapping.avancement) return entier(avancementDe(r)*100) + " %";
+  return texteCellule(r[colonne]);
+}
+
 function pageDetail(doc, contexte, lignes){
   const choisies = etatApp.colonnesChoisies.length ? etatApp.colonnesChoisies : [etatApp.mapping.id];
-  const largeurTotale = DROITE - MARGE;
-  const poids = choisies.map(c => c === etatApp.mapping.id ? 3 : 1);
+
+  let y = nouvelleFeuille(doc, contexte, "portrait");
+  const droite = droiteDe(doc), bas = basDe(doc);
+
+  const poids = choisies.map(poidsColonne);
   const sommePoids = poids.reduce((a,b) => a+b, 0);
   let curseur = MARGE;
   const colonnes = choisies.map((c, i) => {
-    const l = largeurTotale * poids[i] / sommePoids;
-    const col = {titre:c, x:curseur, l:l-2};
+    const l = (droite - MARGE) * poids[i] / sommePoids;
+    const col = {titre:titreColonne(c), colonne:c, x:curseur, l:l-2};
     curseur += l;
     return col;
   });
 
-  let y = nouvelleFeuille(doc, contexte);
   doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
   doc.text("Détail des recommandations", MARGE, y);
   y = enTeteTableau(doc, colonnes, y+4);
 
+  const champAvancement = etatApp.mapping.avancement;
+  const champStatut = etatApp.mapping.statut;
   for (const r of lignes){
-    const cellules = colonnes.map(c => doc.splitTextToSize(texteCellule(r[c.titre]), c.l));
+    const cellules = colonnes.map(c =>
+      c.colonne === champAvancement ? [""] : doc.splitTextToSize(valeurColonne(r, c.colonne), c.l));
     const hauteur = Math.max(6, Math.max(...cellules.map(t => t.length))*3.6 + 2.4);
-    if (y + hauteur > BAS){
-      y = nouvelleFeuille(doc, contexte);
+    if (y + hauteur > bas){
+      y = nouvelleFeuille(doc, contexte, "portrait");
       y = enTeteTableau(doc, colonnes, y);
     }
-    doc.setFontSize(7.5); doc.setTextColor(61,61,58);
-    colonnes.forEach((c, i) => doc.text(cellules[i], c.x, y+4));
+    const statut = statutDe(r[etatApp.mapping.statut]);
+    colonnes.forEach((c, i) => {
+      if (c.colonne === champAvancement){
+        bulleAvancement(doc, c.x, y+0.4, avancementDe(r), statut, c.l);
+      } else {
+        doc.setFontSize(7.5);
+        const encre = (c.colonne === champStatut && statut) ? ENCRE_STATUT[statut.cle] : [61,61,58];
+        doc.setTextColor(...encre);
+        doc.text(cellules[i], c.x, y+4);
+      }
+    });
     y += hauteur;
     doc.setDrawColor(237,235,228); doc.setLineWidth(0.15);
-    doc.line(MARGE, y, DROITE, y);
+    doc.line(MARGE, y, droite, y);
   }
 }
 
@@ -852,7 +962,7 @@ async function editer(){
       libellePerimetre,
       horodatage: Math.floor(Date.now()/1000),
       dateEdition: dateFr(Math.floor(Date.now()/1000)),
-      page: 1
+      pages: ["landscape"]
     };
 
     const stats = calculer(lignes);
