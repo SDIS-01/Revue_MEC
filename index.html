@@ -498,11 +498,15 @@ function remplirEditions(){
 }
 
 function libelleAutomatique(){
-  const base = $("tblSource").value + "_" + dateFr(Math.floor(Date.now()/1000)).replace(/\//g, "-");
+  let etendue = "";
+  if ($("perimetre").value === "groupement" && $("groupement").value){
+    etendue = "_" + $("groupement").value.trim().replace(/[\/\\]/g, "-");
+  }
+  const base = $("tblSource").value + etendue + "_" + dateFr(Math.floor(Date.now()/1000)).replace(/\//g, "-");
   const jour = new Date(); jour.setHours(0,0,0,0);
   const memeJour = etatApp.editions.filter(e => {
     const d = new Date((e.ts || 0) * 1000); d.setHours(0,0,0,0);
-    return d.getTime() === jour.getTime();
+    return d.getTime() === jour.getTime() && String(e.libelle || "").indexOf(base) === 0;
   }).length;
   return memeJour ? base + "_v" + (memeJour + 1) : base;
 }
@@ -1236,10 +1240,11 @@ $("perimetre").addEventListener("change", () => {
   $("ligneGroupement").hidden = mode !== "groupement";
   $("blocSelection").hidden = mode !== "selection";
   remplirEditions();
+  majLibelle();
   enregistrerOptions();
 });
 
-$("groupement").addEventListener("change", enregistrerOptions);
+$("groupement").addEventListener("change", () => { remplirEditions(); majLibelle(); enregistrerOptions(); });
 
 $("avecEvolution").addEventListener("change", () => {
   $("reference").disabled = !$("avecEvolution").checked || !etatApp.editions.length;
