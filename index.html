@@ -118,7 +118,7 @@ const STATUTS = [
   {cle:"termine",    libelle:"Terminé",    couleur:[155,187, 89]},
   {cle:"en cours",   libelle:"En cours",   couleur:[255,204,  0]},
   {cle:"interrompu", libelle:"Interrompu", couleur:[ 89, 89, 89]},
-  {cle:"a faire",    libelle:"À faire",    couleur:[192, 80, 77]}
+  {cle:"a faire",    libelle:"À engager", couleur:[192, 80, 77]}
 ];
 
 const ROUGE_CLAIR = [251,235,235], TEXTE_ROUGE = [153, 51, 51];
@@ -754,7 +754,7 @@ function blocFocus(doc, y, stats){
   doc.text("Focus catégorie et statut", MARGE, y);
 
   const cols = [
-    {cle:"a faire",    x: 80, l:30, titre:"À faire",    doux:ROUGE_CLAIR, encre:TEXTE_ROUGE, taille:8, principal:true},
+    {cle:"a faire",    x: 80, l:30, titre:"À engager", doux:ROUGE_CLAIR, encre:TEXTE_ROUGE, taille:8, principal:true},
     {cle:"en cours",   x:112, l:30, titre:"En cours",   doux:JAUNE_CLAIR, encre:TEXTE_JAUNE, taille:8, principal:true},
     {cle:"termine",    x:144, l:26, titre:"Terminé",    doux:VERT_CLAIR,  encre:TEXTE_VERT,  taille:7.5},
     {cle:"interrompu", x:172, l:26, titre:"Interrompu", doux:GRIS_CLAIR,  encre:TEXTE_GRIS,  taille:7.5}
