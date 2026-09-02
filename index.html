@@ -646,7 +646,9 @@ function enTete(doc, contexte){
   doc.setFontSize(13); doc.setTextColor(...ENCRE);
   doc.text("Revue d'avancement — " + contexte.titre, 48, 17);
   doc.setFontSize(8); doc.setTextColor(...ESTOMPE);
-  doc.text("Édition du " + contexte.dateEdition + " — " + contexte.libellePerimetre, 48, 23);
+  const n = contexte.nombreLignes || 0;
+  const compte = n ? " — " + n + " préconisation" + (n > 1 ? "s" : "") : "";
+  doc.text("Édition du " + contexte.dateEdition + " — " + contexte.libellePerimetre + compte, 48, 23);
   doc.setFillColor(...ROUGE);
   doc.rect(MARGE, 28, droiteDe(doc)-MARGE, 1.1, "F");
   return 38;
@@ -943,7 +945,10 @@ function poidsColonne(colonne){
 }
 
 function titreColonne(colonne){
-  return colonne === etatApp.mapping.avancement ? "Avct" : colonne;
+  const m = etatApp.mapping;
+  if (colonne === m.avancement) return "Avct";
+  if (colonne === m.id)         return "Préconisation";
+  return colonne;
 }
 
 function valeurColonne(r, colonne){
@@ -1159,7 +1164,7 @@ async function editer(){
     const detail = mode === "groupement" ? $("groupement").value
                  : mode === "selection"  ? lignes.map(r => r.id).join(",") : "";
     const libellePerimetre = mode === "groupement" ? "Groupement " + $("groupement").value
-                           : mode === "selection"  ? "Sélection de " + lignes.length + " recommandations"
+                           : mode === "selection"  ? "Sélection"
                            : "Portefeuille complet";
 
     const contexte = {
@@ -1168,6 +1173,7 @@ async function editer(){
       perimetre: mode,
       detailPerimetre: detail,
       libellePerimetre,
+      nombreLignes: lignes.length,
       horodatage: Math.floor(Date.now()/1000),
       dateEdition: dateFr(Math.floor(Date.now()/1000)),
       pages: ["portrait"],
