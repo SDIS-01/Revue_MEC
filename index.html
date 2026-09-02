@@ -749,6 +749,20 @@ function pageEvolution(doc, contexte, evolution){
   doc.text("Évolution depuis la revue du " + dateFr(evolution.edition.ts), MARGE, y);
   y += 8;
 
+  doc.setFontSize(7.5); doc.setTextColor(...GRIS);
+  doc.text(evolution.progres.length + " en progression · " + evolution.recul.length + " en recul · " +
+           evolution.stables.length + " sans changement · " + evolution.nouveaux.length + " entrée(s) · " +
+           evolution.sorties.length + " sortie(s)", MARGE, y);
+  y += 10;
+
+  const riens = !evolution.progres.length && !evolution.recul.length &&
+                !evolution.nouveaux.length && !evolution.sorties.length;
+  if (riens){
+    doc.setFontSize(8); doc.setTextColor(...ESTOMPE);
+    doc.text("Aucun mouvement depuis cette revue.", MARGE, y+2);
+    return y;
+  }
+
   const colonnes = [
     {titre:"Recommandation", x:MARGE, l:94},
     {titre:"Statut",         x:108,   l:26},
@@ -849,11 +863,15 @@ function pastilleStatut(doc, x, y, statut){
 }
 
 function enTeteTableau(doc, colonnes, y){
+  doc.setFontSize(7.5);
+  const titres = colonnes.map(c => doc.splitTextToSize(c.titre, c.l).slice(0,2));
+  const nbLignes = Math.max(1, ...titres.map(t => t.length));
+  const hauteur = 3.6 + nbLignes*3.4;
   doc.setFillColor(...FOND);
-  doc.rect(MARGE, y, droiteDe(doc)-MARGE, 7, "F");
-  doc.setFontSize(7.5); doc.setTextColor(...GRIS);
-  for (const c of colonnes) doc.text(c.titre, c.x, y+4.8);
-  return y+10;
+  doc.rect(MARGE, y, droiteDe(doc)-MARGE, hauteur, "F");
+  doc.setTextColor(...GRIS);
+  colonnes.forEach((c, i) => doc.text(titres[i], c.x, y+4.4));
+  return y + hauteur + 3;
 }
 
 function poidsColonne(colonne){
