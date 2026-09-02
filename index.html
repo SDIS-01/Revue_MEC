@@ -749,12 +749,18 @@ function blocFocus(doc, y, stats){
     }
     ligne += pas;
   }
-  return {zones, y: ligne};
+
+  doc.setFontSize(6.5); doc.setTextColor(...ESTOMPE);
+  doc.text("Cliquez sur une catégorie ou sur un chiffre pour ouvrir le détail correspondant.",
+           MARGE, ligne+3.5);
+
+  return {zones, y: ligne+5};
 }
 
 function pageEvolution(doc, contexte, evolution, depart){
   let y = assurerPlace(doc, contexte, depart, 34);
   const droite = droiteDe(doc), bas = basDe(doc);
+  contexte.reperes.evolution = {page: contexte.pages.length, top: Math.max(0, y-8)};
   doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
   doc.text("Évolution depuis la revue du " + dateFr(evolution.edition.ts), MARGE, y);
   y += 8;
@@ -936,6 +942,7 @@ function pageDetail(doc, contexte, lignes, depart){
 
   doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
   doc.text("Détail des recommandations", MARGE, y);
+  contexte.reperes.detail = {page: contexte.pages.length, top: Math.max(0, y-8)};
   y += 8;
 
   const groupes = [];
@@ -1015,6 +1022,73 @@ function pageDetail(doc, contexte, lignes, depart){
   return ancres;
 }
 
+function ligneSommaire(doc, y, texte, effectif, cible, options){
+  const droite = droiteDe(doc);
+  const x = options.decale ? MARGE+8 : MARGE+5;
+  if (options.couleur){
+    doc.setFillColor(...options.couleur);
+    doc.rect(MARGE, y-2.6, 3, 3, "F");
+  }
+  doc.setFontSize(options.taille);
+  doc.setTextColor(...options.encre);
+  doc.text(texte + (effectif === null ? "" : "  (" + effectif + ")"), x, y);
+  const numero = String(cible.page);
+  doc.text(numero, droite, y, {align:"right"});
+
+  const largeurTexte = doc.getTextWidth(texte + (effectif === null ? "" : "  (" + effectif + ")"));
+  doc.setDrawColor(...VIDE); doc.setLineWidth(0.15);
+  doc.setLineDashPattern([0.4, 0.9], 0);
+  doc.line(x + largeurTexte + 2, y-0.8, droite - 5, y-0.8);
+  doc.setLineDashPattern([], 0);
+
+  doc.link(MARGE, y-4, droite-MARGE, 5.4, {pageNumber: cible.page, top: cible.top});
+  return y + (options.decale ? 5.4 : 6.6);
+}
+
+function pageSommaire(doc, contexte, ancres, stats, evolution){
+  let y = nouvelleFeuille(doc, contexte);
+  const numeroFeuille = doc.internal.getNumberOfPages();
+
+  doc.setFontSize(11); doc.setTextColor(...ENCRE);
+  doc.text("Sommaire", MARGE, y);
+  y += 10;
+
+  y = ligneSommaire(doc, y, "Synthèse", null, {page:1, top:0},
+                    {taille:9, encre:ENCRE});
+  if (evolution && contexte.reperes.evolution){
+    y = ligneSommaire(doc, y, "Évolution depuis la revue du " + dateFr(evolution.edition.ts), null,
+                      contexte.reperes.evolution, {taille:9, encre:ENCRE});
+  }
+  if (contexte.reperes.detail){
+    y = ligneSommaire(doc, y, "Détail des recommandations", null,
+                      contexte.reperes.detail, {taille:9, encre:ENCRE});
+  }
+  y += 3;
+
+  for (const cat of CATEGORIES){
+    const cible = ancres.get(cat.cle);
+    if (!cible) continue;
+    y = ligneSommaire(doc, y, cat.libelle, stats.parCategorie[cat.cle], cible,
+                      {taille:8.5, encre:[61,61,58], couleur:cat.couleur});
+    for (const st of STATUTS){
+      const sous = ancres.get(cat.cle + "|" + st.cle);
+      if (!sous) continue;
+      y = ligneSommaire(doc, y, st.libelle, stats.croise[cat.cle][st.cle], sous,
+                        {taille:7.5, encre:ENCRE_STATUT[st.cle], decale:true});
+    }
+    y += 2;
+  }
+  return numeroFeuille;
+}
+
+function decalerAncres(ancres, contexte){
+  const decalees = new Map();
+  const bouger = a => ({page: a.page >= 2 ? a.page + 1 : a.page, top: a.top});
+  for (const [cle, a] of ancres) decalees.set(cle, bouger(a));
+  for (const cle of Object.keys(contexte.reperes)) contexte.reperes[cle] = bouger(contexte.reperes[cle]);
+  return decalees;
+}
+
 function poserLiens(doc, zones, ancres){
   doc.setPage(1);
   for (const z of zones){
@@ -1079,7 +1153,8 @@ async function editer(){
       libellePerimetre,
       horodatage: Math.floor(Date.now()/1000),
       dateEdition: dateFr(Math.floor(Date.now()/1000)),
-      pages: ["portrait"]
+      pages: ["portrait"],
+      reperes: {}
     };
 
     const stats = calculer(lignes);
@@ -1094,7 +1169,13 @@ async function editer(){
     const synthese = pageSynthese(doc, contexte, stats, evolution);
     let curseur = synthese.y + 8;
     if (evolution) curseur = pageEvolution(doc, contexte, evolution, curseur) + 6;
-    const ancres = pageDetail(doc, contexte, lignes, curseur);
+    let ancres = pageDetail(doc, contexte, lignes, curseur);
+
+    ancres = decalerAncres(ancres, contexte);
+    const feuilleSommaire = pageSommaire(doc, contexte, ancres, stats, evolution);
+    doc.movePage(feuilleSommaire, 2);
+    contexte.pages.splice(1, 0, contexte.pages.pop());
+
     poserLiens(doc, synthese.zones, ancres);
     piedDePage(doc, contexte);
 
