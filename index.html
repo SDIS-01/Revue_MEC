@@ -90,7 +90,8 @@
 
 <fieldset>
   <legend>Édition</legend>
-  <div class="ligne"><label for="libelle">Libellé de la revue</label><input type="text" id="libelle" placeholder="Revue COPIL septembre"></div>
+  <div class="ligne"><label for="libelle">Libellé de la revue</label><input type="text" id="libelle" placeholder="Libellé automatique"></div>
+  <p class="aide">Proposé automatiquement, modifiable. Videz le champ pour revenir à la proposition.</p>
   <div class="actions">
     <button id="btnEditer" class="primaire">Éditer la revue</button>
     <span class="etat" id="etat"></span>
@@ -433,10 +434,10 @@ function construireSelection(){
 async function chargerEditions(){
   etatApp.editions = [];
   const table = $("tblHisto").value;
-  if (!table){ remplirEditions(); return; }
+  if (!table){ remplirEditions(); majLibelle(); return; }
   let donnees;
   try{ donnees = await grist.docApi.fetchTable(table); }
-  catch(e){ remplirEditions(); return; }
+  catch(e){ remplirEditions(); majLibelle(); return; }
   const n = (donnees.id || []).length;
   const groupes = new Map();
   for (let i=0; i<n; i++){
@@ -459,6 +460,7 @@ async function chargerEditions(){
   }
   etatApp.editions = [...groupes.values()].sort((a,b) => (b.ts||0) - (a.ts||0));
   remplirEditions();
+  majLibelle();
 }
 
 function remplirEditions(){
@@ -483,6 +485,22 @@ function remplirEditions(){
     if (i === 0) o.selected = true;
     sel.appendChild(o);
   });
+}
+
+function libelleAutomatique(){
+  const base = $("tblSource").value + "_" + dateFr(Math.floor(Date.now()/1000)).replace(/\//g, "-");
+  const jour = new Date(); jour.setHours(0,0,0,0);
+  const memeJour = etatApp.editions.filter(e => {
+    const d = new Date((e.ts || 0) * 1000); d.setHours(0,0,0,0);
+    return d.getTime() === jour.getTime();
+  }).length;
+  return memeJour ? base + "_v" + (memeJour + 1) : base;
+}
+
+function majLibelle(){
+  const champ = $("libelle");
+  if (champ.dataset.manuel === "1") return;
+  champ.value = libelleAutomatique();
 }
 
 function verifierHistorique(){
@@ -659,17 +677,20 @@ function pageSynthese(doc, contexte, stats, evolution){
 
   doc.setFontSize(8); doc.setTextColor(...GRIS);
   doc.text("Avancement global", MARGE, y);
-  doc.setFontSize(26); doc.setTextColor(...ENCRE);
-  doc.text(pourcent(stats.global), MARGE, y+13);
+  const teinteGlobale = couleurAvancement(stats.global, null);
+  doc.setFillColor(...teinteGlobale.fond);
+  doc.roundedRect(MARGE, y+2, 52, 18, 3, 3, "F");
+  doc.setFontSize(23); doc.setTextColor(...teinteGlobale.encre);
+  doc.text(pourcent(stats.global), MARGE+26, y+15, {align:"center"});
 
   if (evolution){
     const ecart = (stats.global - evolution.globalAvant) * 100;
     const hausse = ecart >= 0;
     doc.setFillColor(...(hausse ? [234,243,222] : [252,235,235]));
-    doc.roundedRect(58, y+4, 38, 9, 1.2, 1.2, "F");
+    doc.roundedRect(70, y+6.5, 38, 9, 1.2, 1.2, "F");
     doc.setFontSize(9); doc.setTextColor(...(hausse ? [59,109,17] : [153,51,51]));
     doc.text((hausse ? "+ " : "- ") + Math.abs(ecart).toFixed(1).replace(".",",") + " pts",
-             77, y+10.5, {align:"center"});
+             89, y+13, {align:"center"});
     doc.setFontSize(7.5); doc.setTextColor(...ESTOMPE);
     doc.text("vs revue du " + dateFr(evolution.edition.ts) + " — " + pourcent(evolution.globalAvant),
              MARGE, y+22);
@@ -1197,7 +1218,7 @@ function enregistrerOptions(){
 
 /* ---------- Branchements ---------- */
 
-$("tblSource").addEventListener("change", async () => { await chargerSource(); enregistrerOptions(); });
+$("tblSource").addEventListener("change", async () => { await chargerSource(); majLibelle(); enregistrerOptions(); });
 $("tblHisto").addEventListener("change", async () => { verifierHistorique(); await chargerEditions(); enregistrerOptions(); });
 
 $("perimetre").addEventListener("change", () => {
@@ -1220,6 +1241,11 @@ $("recherche").addEventListener("input", e => {
   for (const item of $("listeSelection").children){
     item.hidden = filtre && !item.dataset.cle.includes(filtre);
   }
+});
+
+$("libelle").addEventListener("input", () => {
+  $("libelle").dataset.manuel = $("libelle").value.trim() ? "1" : "";
+  if (!$("libelle").dataset.manuel) majLibelle();
 });
 
 $("btnFermerConfig").addEventListener("click", () => { $("blocSources").hidden = true; });
