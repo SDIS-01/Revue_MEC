@@ -706,11 +706,11 @@ function pageSynthese(doc, contexte, stats, evolution){
   })), 87);
 
   doc.line(MARGE, haut+74, droite, haut+74);
-  return blocFocus(doc, haut+86, stats);
+  return blocFocus(doc, haut+84, stats);
 }
 
-function pageEvolution(doc, contexte, evolution){
-  let y = nouvelleFeuille(doc, contexte, "portrait");
+function pageEvolution(doc, contexte, evolution, depart){
+  let y = assurerPlace(doc, contexte, depart, 34);
   const droite = droiteDe(doc), bas = basDe(doc);
   doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
   doc.text("Évolution depuis la revue du " + dateFr(evolution.edition.ts), MARGE, y);
@@ -727,7 +727,7 @@ function pageEvolution(doc, contexte, evolution){
   if (riens){
     doc.setFontSize(8); doc.setTextColor(...ESTOMPE);
     doc.text("Aucun mouvement depuis cette revue.", MARGE, y+2);
-    return y;
+    return y+8;
   }
 
   const colonnes = [
@@ -747,7 +747,7 @@ function pageEvolution(doc, contexte, evolution){
   const m = etatApp.mapping;
   for (const section of sections){
     if (!section.items.length) continue;
-    if (y > bas-14){ y = nouvelleFeuille(doc, contexte, "portrait"); y = enTeteTableau(doc, colonnes, y); }
+    if (y > bas-16){ y = nouvelleFeuille(doc, contexte); y = enTeteTableau(doc, colonnes, y); }
     doc.setFontSize(7.5); doc.setTextColor(...GRIS);
     doc.text(section.titre + " (" + section.items.length + ")", MARGE, y+4);
     y += 8;
@@ -756,7 +756,7 @@ function pageEvolution(doc, contexte, evolution){
       const libelle = texteCellule(item.r[m.id]);
       const lignes = doc.splitTextToSize(libelle, colonnes[0].l-2);
       const hauteur = Math.max(6, lignes.length*3.6 + 2.4);
-      if (y + hauteur > bas){ y = nouvelleFeuille(doc, contexte, "portrait"); y = enTeteTableau(doc, colonnes, y); }
+      if (y + hauteur > bas){ y = nouvelleFeuille(doc, contexte); y = enTeteTableau(doc, colonnes, y); }
       doc.setFontSize(7.5); doc.setTextColor(61,61,58);
       doc.text(lignes, colonnes[0].x, y+4);
       pastilleStatut(doc, colonnes[1].x, y+0.6, statutDe(item.r[m.statut]));
@@ -780,7 +780,7 @@ function pageEvolution(doc, contexte, evolution){
   }
 
   if (evolution.sorties.length){
-    if (y > bas-14) y = nouvelleFeuille(doc, contexte, "portrait");
+    if (y > bas-14) y = nouvelleFeuille(doc, contexte);
     doc.setFontSize(7.5); doc.setTextColor(...GRIS);
     doc.text("Sorties du périmètre (" + evolution.sorties.length + ")", MARGE, y+4);
     y += 8;
@@ -788,7 +788,7 @@ function pageEvolution(doc, contexte, evolution){
       doc.setFontSize(7.5);
       const lignes = doc.splitTextToSize(texteCellule(s.id), droite-MARGE-2);
       const hauteur = Math.max(6, lignes.length*3.6 + 2.4);
-      if (y + hauteur > bas) y = nouvelleFeuille(doc, contexte, "portrait");
+      if (y + hauteur > bas) y = nouvelleFeuille(doc, contexte);
       doc.setTextColor(...ESTOMPE);
       doc.text(lignes, MARGE, y+4);
       y += hauteur;
@@ -831,6 +831,10 @@ function pastilleStatut(doc, x, y, statut){
   doc.text(statut.libelle, x+2, y+3.5);
 }
 
+function assurerPlace(doc, contexte, y, besoin){
+  return (y + besoin > basDe(doc)) ? nouvelleFeuille(doc, contexte) : y;
+}
+
 function enTeteTableau(doc, colonnes, y){
   doc.setFontSize(7.5);
   const titres = colonnes.map(c =>
@@ -863,12 +867,12 @@ function valeurColonne(r, colonne){
   return texteCellule(r[colonne]);
 }
 
-function pageDetail(doc, contexte, lignes){
+function pageDetail(doc, contexte, lignes, depart){
   const m = etatApp.mapping;
   const choisies = etatApp.colonnesChoisies.length ? etatApp.colonnesChoisies : [m.id];
   const ancres = new Map();
 
-  let y = nouvelleFeuille(doc, contexte, "portrait");
+  let y = assurerPlace(doc, contexte, depart, 40);
   const droite = droiteDe(doc), bas = basDe(doc);
 
   const poids = choisies.map(poidsColonne);
@@ -883,7 +887,7 @@ function pageDetail(doc, contexte, lignes){
 
   doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
   doc.text("Détail des recommandations", MARGE, y);
-  y += 10;
+  y += 8;
 
   const groupes = [];
   for (const cat of CATEGORIES){
@@ -898,7 +902,7 @@ function pageDetail(doc, contexte, lignes){
   const rangs = [...STATUTS, {cle:"autre", libelle:"Statut non reconnu"}];
 
   for (const groupe of groupes){
-    if (y > bas - 32){ y = nouvelleFeuille(doc, contexte, "portrait"); }
+    y = assurerPlace(doc, contexte, y, 34);
     ancres.set(groupe.cat.cle, {page: contexte.pages.length, top: Math.max(0, y-8)});
 
     doc.setFillColor(...groupe.cat.couleur);
@@ -915,8 +919,8 @@ function pageDetail(doc, contexte, lignes){
       });
       if (!sous.length) continue;
 
-      if (y > bas - 18){
-        y = nouvelleFeuille(doc, contexte, "portrait");
+      if (y > bas - 20){
+        y = nouvelleFeuille(doc, contexte);
         y = enTeteTableau(doc, colonnes, y);
       }
       ancres.set(groupe.cat.cle + "|" + rang.cle, {page: contexte.pages.length, top: Math.max(0, y-8)});
@@ -930,9 +934,9 @@ function pageDetail(doc, contexte, lignes){
         doc.setFontSize(7.5);
         const cellules = colonnes.map(c =>
           c.colonne === m.avancement ? [""] : doc.splitTextToSize(valeurColonne(r, c.colonne), c.l));
-        const hauteur = Math.max(6, Math.max(...cellules.map(t => t.length))*3.6 + 2.4);
+        const hauteur = Math.max(6, Math.max(...cellules.map(t => t.length))*3.4 + 2.2);
         if (y + hauteur > bas){
-          y = nouvelleFeuille(doc, contexte, "portrait");
+          y = nouvelleFeuille(doc, contexte);
           y = enTeteTableau(doc, colonnes, y);
         }
         const statut = statutDe(r[m.statut]);
@@ -949,9 +953,9 @@ function pageDetail(doc, contexte, lignes){
         doc.setDrawColor(237,235,228); doc.setLineWidth(0.15);
         doc.line(MARGE, y, droite, y);
       }
-      y += 3;
+      y += 2;
     }
-    y += 6;
+    y += 4;
   }
   return ancres;
 }
@@ -1029,10 +1033,11 @@ async function editer(){
 
     const {jsPDF} = window.jspdf;
     const doc = new jsPDF({orientation:"portrait", unit:"mm", format:"a4"});
-    const zones = pageSynthese(doc, contexte, stats, evolution);
-    if (evolution) pageEvolution(doc, contexte, evolution);
-    const ancres = pageDetail(doc, contexte, lignes);
-    poserLiens(doc, zones, ancres);
+    const synthese = pageSynthese(doc, contexte, stats, evolution);
+    let curseur = synthese.y + 8;
+    if (evolution) curseur = pageEvolution(doc, contexte, evolution, curseur) + 6;
+    const ancres = pageDetail(doc, contexte, lignes, curseur);
+    poserLiens(doc, synthese.zones, ancres);
     piedDePage(doc, contexte);
 
     await enregistrerRevue(lignes, contexte);
