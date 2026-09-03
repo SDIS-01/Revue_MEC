@@ -86,12 +86,19 @@
     <label><input type="checkbox" id="avecEvolution"> Inclure l'évolution</label>
   </div>
   <div class="ligne"><label for="reference">Édition de référence</label><select id="reference"></select></div>
+  <div class="ligne">
+    <label><input type="checkbox" id="refOfficielles"> Revues officielles uniquement</label>
+  </div>
 </fieldset>
 
 <fieldset>
   <legend>Édition</legend>
   <div class="ligne"><label for="libelle">Libellé de la revue</label><input type="text" id="libelle" placeholder="Libellé automatique"></div>
   <p class="aide">Proposé automatiquement, modifiable. Videz le champ pour revenir à la proposition.</p>
+  <div class="ligne">
+    <label><input type="checkbox" id="officielle"> Revue officielle</label>
+  </div>
+  <p class="aide">Marque la revue comme référence de suivi ; elle pourra être isolée dans les comparaisons.</p>
   <div class="actions">
     <button id="btnEditer" class="primaire">Éditer la revue</button>
     <span class="etat" id="etat"></span>
@@ -128,8 +135,9 @@ const GRIS_CLAIR  = [241,239,232], TEXTE_GRIS  = [122,121,115];
 const ENCRE = [26,26,24], GRIS = [102,102,96], ESTOMPE = [136,135,128];
 const TRAIT = [221,219,211], FOND = [244,243,238], ROUGE = [192,80,77], VIDE = [201,199,191];
 
-const COLONNES_HISTO = ["Date_Revue","Libelle_Revue","Perimetre","Detail_Perimetre","Cle_Ligne",
-  "ID_MEC_2023","Recommandation_Rappel","Statut","Avancement","Groupement","Porteur"];
+const COLONNES_HISTO = ["Date_Revue","Libelle_Revue","Revue_Officielle","Perimetre","Detail_Perimetre",
+  "Cle_Ligne","ID_MEC_2023","Recommandation_Rappel","Statut","Avancement","Groupement","Porteur"];
+const COL_OFFICIELLE = "Revue_Officielle";
 
 const CHAMPS = [
   {cle:"id",         libelle:"Identifiant",  defaut:"ID_MEC_2023"},
@@ -177,7 +185,7 @@ function texteCellule(v){
 const etatApp = {
   tables:[], colonnesSource:[], enregistrements:[],
   mapping:{}, colonnesChoisies:[], selection:new Set(),
-  editions:[], options:{}
+  editions:[], histoColonnes:[], options:{}
 };
 
 const $ = id => document.getElementById(id);
@@ -206,6 +214,7 @@ function ouvrirConfiguration(){
 async function demarrer(){
   try{
     etatApp.options = (await grist.widgetApi.getOptions()) || {};
+    $("refOfficielles").checked = !!etatApp.options.refOfficielles;
     const tables = await grist.docApi.listTables();
     etatApp.tables = tables;
     remplirSelect($("tblSource"), tables, etatApp.options.tableSource || "MEC_2023");
@@ -433,11 +442,13 @@ function construireSelection(){
 
 async function chargerEditions(){
   etatApp.editions = [];
+  etatApp.histoColonnes = [];
   const table = $("tblHisto").value;
   if (!table){ remplirEditions(); majLibelle(); return; }
   let donnees;
   try{ donnees = await grist.docApi.fetchTable(table); }
   catch(e){ remplirEditions(); majLibelle(); return; }
+  etatApp.histoColonnes = Object.keys(donnees);
   const n = (donnees.id || []).length;
   const groupes = new Map();
   for (let i=0; i<n; i++){
@@ -446,6 +457,7 @@ async function chargerEditions(){
     if (!groupes.has(cle)){
       groupes.set(cle, {
         ts, libelle: donnees.Libelle_Revue ? donnees.Libelle_Revue[i] : "",
+        officielle: donnees[COL_OFFICIELLE] ? !!donnees[COL_OFFICIELLE][i] : false,
         perimetre: donnees.Perimetre ? donnees.Perimetre[i] : "",
         detail: donnees.Detail_Perimetre ? donnees.Detail_Perimetre[i] : "",
         lignes: []
@@ -474,11 +486,15 @@ function remplirEditions(){
   sel.innerHTML = "";
   const perimetre = $("perimetre").value;
   const detailCourant = perimetre === "groupement" ? $("groupement").value : "";
-  const compatibles = etatApp.editions.filter(e => !e.perimetre || e.perimetre === perimetre);
-  const liste = compatibles.length ? compatibles : etatApp.editions;
+  const officiellesSeules = $("refOfficielles").checked;
+  const base = officiellesSeules ? etatApp.editions.filter(e => e.officielle) : etatApp.editions;
+  const compatibles = base.filter(e => !e.perimetre || e.perimetre === perimetre);
+  const liste = compatibles.length ? compatibles : base;
+  $("refOfficielles").disabled = !$("avecEvolution").checked;
   if (!liste.length){
     const o = document.createElement("option");
-    o.value = ""; o.textContent = "Aucune édition enregistrée";
+    o.value = "";
+    o.textContent = officiellesSeules ? "Aucune revue officielle enregistrée" : "Aucune édition enregistrée";
     sel.appendChild(o);
     sel.disabled = true;
     return;
@@ -490,7 +506,7 @@ function remplirEditions(){
     const differe = e.perimetre !== perimetre ||
                     (perimetre === "groupement" && (e.detail || "") !== detailCourant);
     const etendue = libelleEtendue(e);
-    o.textContent = (e.libelle ? e.libelle + " — " : "") + dateFr(e.ts) +
+    o.textContent = (e.officielle ? "★ " : "") + (e.libelle ? e.libelle + " — " : "") + dateFr(e.ts) +
                     (differe && etendue ? "  (" + etendue + ")" : "");
     if (i === 0) o.selected = true;
     sel.appendChild(o);
@@ -799,7 +815,8 @@ function pageEvolution(doc, contexte, evolution, depart){
   const droite = droiteDe(doc), bas = basDe(doc);
   contexte.reperes.evolution = {page: contexte.pages.length, top: Math.max(0, y-8)};
   doc.setFontSize(8.5); doc.setTextColor(...ENCRE);
-  doc.text("Évolution depuis la revue du " + dateFr(evolution.edition.ts), MARGE, y);
+  doc.text("Évolution depuis la revue du " + dateFr(evolution.edition.ts) +
+           (evolution.edition.officielle ? " (revue officielle)" : ""), MARGE, y);
   y += 8;
 
   doc.setFontSize(7.5); doc.setTextColor(...GRIS);
@@ -1125,13 +1142,16 @@ function poserLiens(doc, zones, ancres){
 async function enregistrerRevue(lignes, contexte){
   const table = $("tblHisto").value;
   const m = etatApp.mapping;
+  const suivreOfficielle = etatApp.histoColonnes.includes(COL_OFFICIELLE);
   const valeurs = {
     Date_Revue: [], Libelle_Revue: [], Perimetre: [], Detail_Perimetre: [], Cle_Ligne: [],
     ID_MEC_2023: [], Recommandation_Rappel: [], Statut: [], Avancement: [], Groupement: [], Porteur: []
   };
+  if (suivreOfficielle) valeurs[COL_OFFICIELLE] = [];
   for (const r of lignes){
     valeurs.Date_Revue.push(contexte.horodatage);
     valeurs.Libelle_Revue.push(contexte.libelle);
+    if (suivreOfficielle) valeurs[COL_OFFICIELLE].push(!!contexte.officielle);
     valeurs.Perimetre.push(contexte.perimetre);
     valeurs.Detail_Perimetre.push(contexte.detailPerimetre);
     valeurs.Cle_Ligne.push(r.id);
@@ -1156,6 +1176,10 @@ async function editer(){
     message("Édition en cours…");
     const lignes = enPerimetre();
     if (!lignes.length){ message("Aucune recommandation dans ce périmètre.", "erreur"); return; }
+    if ($("officielle").checked && !etatApp.histoColonnes.includes(COL_OFFICIELLE)){
+      message("Ajoutez d'abord une colonne " + COL_OFFICIELLE + " (type Toggle) dans la table d'historique.", "erreur");
+      return;
+    }
 
     const mode = $("perimetre").value;
     if (mode === "groupement" && !$("groupement").value){
@@ -1170,6 +1194,7 @@ async function editer(){
     const contexte = {
       titre: $("tblSource").value,
       libelle: $("libelle").value.trim(),
+      officielle: $("officielle").checked,
       perimetre: mode,
       detailPerimetre: detail,
       libellePerimetre,
@@ -1232,7 +1257,8 @@ function enregistrerOptions(){
     colonnes: etatApp.colonnesChoisies,
     perimetre: $("perimetre").value,
     detailPerimetre: $("groupement").value,
-    avecEvolution: $("avecEvolution").checked
+    avecEvolution: $("avecEvolution").checked,
+    refOfficielles: $("refOfficielles").checked
   }).catch(() => {});
 }
 
@@ -1253,9 +1279,11 @@ $("perimetre").addEventListener("change", () => {
 $("groupement").addEventListener("change", () => { remplirEditions(); majLibelle(); enregistrerOptions(); });
 
 $("avecEvolution").addEventListener("change", () => {
-  $("reference").disabled = !$("avecEvolution").checked || !etatApp.editions.length;
+  remplirEditions();
   enregistrerOptions();
 });
+
+$("refOfficielles").addEventListener("change", () => { remplirEditions(); enregistrerOptions(); });
 
 $("recherche").addEventListener("input", e => {
   const filtre = normaliser(e.target.value);
